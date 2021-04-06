@@ -1,10 +1,13 @@
+#[macro_use]
+extern crate derivative;
+
 use once_cell::sync::OnceCell;
 use skim::{
     prelude::{bounded, SkimOptionsBuilder},
     Skim, SkimItem, SkimItemReceiver, SkimItemSender,
 };
 use std::{
-    env, io,
+    env, fs, io,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -15,10 +18,9 @@ mod use_command {
     use skim::SkimItem;
     use std::{
         borrow::Cow,
-        cmp::Ordering,
         env,
         ffi::OsString,
-        fs::{self, DirEntry, Metadata},
+        fs::{self, DirEntry},
         io,
         path::{Path, PathBuf},
     };
@@ -26,6 +28,7 @@ mod use_command {
     pub(crate) enum UseResult {
         KeepCurrent,
         Use {
+            name: String,
             java_home: PathBuf,
             path: Option<OsString>,
         },
@@ -38,7 +41,6 @@ mod use_command {
         let candidates_dir = candidates_dir.as_ref();
         let mut candidates = fs::read_dir(candidates_dir)?
             .filter_map(read_entry)
-            .filter(|c| matches!(c.candidate_type, CandidateType::Candidate))
             .collect::<Vec<_>>();
 
         // sort by version
@@ -46,6 +48,7 @@ mod use_command {
 
         let selected = crate::skim_select_one(candidates, query, true);
         let use_result = selected.map_or(UseResult::KeepCurrent, |selection| {
+            let name = selection.name().to_string();
             let candidate_path = selection.path;
 
             let old_path = env::var_os("PATH");
@@ -73,6 +76,7 @@ mod use_command {
             });
 
             UseResult::Use {
+                name,
                 java_home: candidate_path,
                 path: new_path,
             }
@@ -81,51 +85,17 @@ mod use_command {
         Ok(use_result)
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Derivative)]
+    #[derivative(PartialEq, Eq, PartialOrd, Ord)]
     struct Candidate {
         version: Option<Version<'static>>,
+        #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
         path: PathBuf,
-        metadata: Metadata,
-        candidate_type: CandidateType,
     }
 
     impl SkimItem for Candidate {
         fn text(&self) -> std::borrow::Cow<str> {
             Cow::Borrowed(self.name())
-        }
-    }
-
-    impl PartialEq for Candidate {
-        fn eq(&self, other: &Self) -> bool {
-            if self.candidate_type != other.candidate_type {
-                return false;
-            }
-            match self.candidate_type {
-                CandidateType::Current => true,
-                CandidateType::Alias => self.name() == other.name(),
-                CandidateType::Candidate => self.version == other.version,
-            }
-        }
-    }
-
-    impl Eq for Candidate {}
-
-    impl PartialOrd for Candidate {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            Some(self.cmp(other))
-        }
-    }
-
-    impl Ord for Candidate {
-        fn cmp(&self, other: &Self) -> Ordering {
-            match (self.candidate_type, other.candidate_type) {
-                (CandidateType::Current, CandidateType::Current) => Ordering::Equal,
-                (CandidateType::Current, _) => Ordering::Less,
-                (CandidateType::Alias, CandidateType::Current) => Ordering::Greater,
-                (CandidateType::Alias, _) => self.version.cmp(&other.version),
-                (CandidateType::Candidate, CandidateType::Current) => Ordering::Greater,
-                (CandidateType::Candidate, _) => self.version.cmp(&other.version),
-            }
         }
     }
 
@@ -140,62 +110,29 @@ mod use_command {
                 .expect("invalid filename")
         }
 
-        fn current(path: PathBuf, metadata: Metadata) -> Self {
-            Self::new(path, metadata, CandidateType::Current)
-        }
-
-        fn alias(path: PathBuf, metadata: Metadata) -> Self {
-            Self::new(path, metadata, CandidateType::Alias)
-        }
-
-        fn candidate(path: PathBuf, metadata: Metadata) -> Self {
-            Self::new(path, metadata, CandidateType::Candidate)
-        }
-
-        fn new(path: PathBuf, metadata: Metadata, candidate_type: CandidateType) -> Self {
+        fn new(path: PathBuf) -> Self {
             let version = lenient_semver::parse_into::<Version>(Self::name_from_path(&path))
                 .ok()
                 .map(|version| {
                     let (version, _, _) = version.disassociate_metadata::<'static>();
                     version
                 });
-            Self {
-                version,
-                path,
-                metadata,
-                candidate_type,
-            }
+            Self { version, path }
         }
-    }
-
-    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-    enum CandidateType {
-        Current,
-        Alias,
-        Candidate,
     }
 
     fn read_entry(entry: io::Result<DirEntry>) -> Option<Candidate> {
         let entry = entry.ok()?;
-        let metadata = entry.metadata().ok()?;
 
-        if !metadata.is_dir() {
-            if metadata.is_file() {
-                // a regular file: skip
-                return None;
-            }
-
-            // neither dir nor file: it's a symlink
-            if entry.file_name() == "current" {
-                // check if it is the 'current' pointer
-                Some(Candidate::current(entry.path(), metadata))
-            } else {
-                // interpret every other symlink as an alias
-                Some(Candidate::alias(entry.path(), metadata))
-            }
-        } else {
-            Some(Candidate::candidate(entry.path(), metadata))
-        }
+        // Check if that entry is not a directory.
+        // This is either a regular file or a symlink
+        // Files are generally skipped, symlinks could be useful
+        // with regard to alias handling. For now, we skip those as well.
+        entry
+            .metadata()
+            .ok()?
+            .is_dir()
+            .then(|| Candidate::new(entry.path()))
     }
 }
 
@@ -216,6 +153,71 @@ fn sdkman_candidates_dir() -> &'static Path {
     })
 }
 
+fn sdkman_config() -> &'static [(String, String)] {
+    fn load() -> Vec<(String, String)> {
+        let sdkman_config = env::var_os("SDKMAN_DIR")
+            .and_then(|sdkman_dir| {
+                let mut sdkman_dir = PathBuf::from(sdkman_dir);
+                sdkman_dir.push("etc");
+                sdkman_dir.push("config");
+                fs::read_to_string(sdkman_dir).ok()
+            })
+            .unwrap_or_default();
+
+        sdkman_config
+            .lines()
+            .filter_map(|s| {
+                let s = s.trim();
+                if s.is_empty() || s.starts_with('#') {
+                    None
+                } else {
+                    let mut parts = s.splitn(2, '=');
+                    let key = parts.next()?.trim();
+                    let value = parts.next()?.trim();
+                    Some((String::from(key), String::from(value)))
+                }
+            })
+            .collect()
+    }
+
+    static SDKMAN_CONFIG: OnceCell<Vec<(String, String)>> = OnceCell::new();
+    SDKMAN_CONFIG.get_or_init(load).as_slice()
+}
+
+fn use_color() -> bool {
+    fn check_for_colors() -> bool {
+        if clicolors_control::colors_enabled() {
+            // check if colors are explicitly disabled
+            sdkman_config()
+                .iter()
+                .all(|(k, v)| k != "sdkman_colour_enable" || v != "false")
+        } else {
+            // check if colors are explicitly enabled
+            sdkman_config()
+                .iter()
+                .any(|(k, v)| k == "sdkman_colour_enable" && v == "true")
+        }
+    }
+
+    static SDKMAN_COLOR_ENABLED: OnceCell<bool> = OnceCell::new();
+    *SDKMAN_COLOR_ENABLED.get_or_init(check_for_colors)
+}
+
+macro_rules! eprint_color {
+    ($color:path, $($arg:tt)*) => ({
+        if use_color() {
+            let text = ::std::fmt::format(format_args!($($arg)*));
+            eprintln!("{}", $color.paint(text));
+        } else {
+            eprintln!($($arg)*);
+        }
+    })
+}
+
+macro_rules! eprint_green {
+    ($($arg:tt)*) => { eprint_color!(::ansi_term::Colour::Green, $($arg)*); }
+}
+
 fn skim_select_one<T: SkimItem + Clone>(
     items: Vec<T>,
     query: Option<String>,
@@ -223,7 +225,6 @@ fn skim_select_one<T: SkimItem + Clone>(
 ) -> Option<T> {
     let (tx, rx): (SkimItemSender, SkimItemReceiver) = bounded(items.len());
     for item in items {
-        // println!("item typeid = {:?}", item.as_any().type_id());
         tx.send(Arc::new(item)).unwrap();
     }
 
@@ -259,17 +260,18 @@ fn skim_select_one<T: SkimItem + Clone>(
 fn run() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let mut args = pico_args::Arguments::from_env();
     let query: Option<String> = args.opt_free_from_str()?;
-
-    match use_command::run(query, sdkman_candidates_dir())? {
-        UseResult::KeepCurrent => {
-            eprint!("Keeping current version");
-        }
-        UseResult::Use { java_home, path } => {
-            println!("export JAVA_HOME=\"{}\"", java_home.display());
-            if let Some(path) = path {
-                let path = path.to_str().expect(r"Invalid PATH conversion to UTF-8. This is probably a Windows machine, sooooooo ¯\_(ツ)_/¯");
-                println!("export PATH=\"{}\"", path);
-            }
+    let use_result = use_command::run(query, sdkman_candidates_dir())?;
+    if let UseResult::Use {
+        name,
+        java_home,
+        path,
+    } = use_result
+    {
+        eprint_green!("Using java version {} in this shell.", name);
+        println!("export JAVA_HOME=\"{}\"", java_home.display());
+        if let Some(path) = path {
+            let path = path.to_str().expect(r"Invalid PATH conversion to UTF-8. This is probably a Windows machine, sooooooo ¯\_(ツ)_/¯");
+            println!("export PATH=\"{}\"", path);
         }
     }
 

@@ -11,10 +11,13 @@ categories = ["command-line-utilities"]
 keywords = ["sdkman", "jdk", "java"]
 
 [dependencies]
-lenient_semver = { version = "0.3.0", default-features = false, features = ["version_lite"] }
-once_cell = "1.7.2"
-pico-args = "0.4.0"
-skim = "0.9.4"
+ansi_term = "0.11"
+clicolors-control = "1"
+derivative = "2"
+lenient_semver = { version = "0.3", default-features = false, features = ["version_lite"] }
+once_cell = "1"
+pico-args = "0.4"
+skim = "0.9"
 
 [profile.release]
 codegen-units = 1
