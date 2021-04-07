@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate derivative;
 
+use clap::{App, AppSettings, Arg};
 use once_cell::sync::OnceCell;
 use skim::{
     prelude::{bounded, SkimOptionsBuilder},
@@ -35,7 +36,7 @@ mod use_command {
     }
 
     pub(crate) fn run(
-        query: Option<String>,
+        query: Option<&str>,
         candidates_dir: impl AsRef<Path>,
     ) -> io::Result<UseResult> {
         let candidates_dir = candidates_dir.as_ref();
@@ -220,7 +221,7 @@ macro_rules! eprint_green {
 
 fn skim_select_one<T: SkimItem + Clone>(
     items: Vec<T>,
-    query: Option<String>,
+    query: Option<&str>,
     tac: bool,
 ) -> Option<T> {
     let (tx, rx): (SkimItemSender, SkimItemReceiver) = bounded(items.len());
@@ -232,7 +233,6 @@ fn skim_select_one<T: SkimItem + Clone>(
     drop(tx);
 
     let options = SkimOptionsBuilder::default()
-        // .height(Some("50%"))
         .query(query.as_deref())
         .tac(tac)
         .select1(true)
@@ -258,9 +258,21 @@ fn skim_select_one<T: SkimItem + Clone>(
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error + 'static>> {
-    let mut args = pico_args::Arguments::from_env();
-    let query: Option<String> = args.opt_free_from_str()?;
-    let use_result = use_command::run(query, sdkman_candidates_dir())?;
+    let matches = App::new(clap::crate_name!())
+        .version(clap::crate_version!())
+        .about(clap::crate_description!())
+        .setting(AppSettings::UnifiedHelpMessage)
+        .setting(AppSettings::ColorAuto)
+        .arg(
+            Arg::with_name("QUERY")
+                .help("Optional query to start a selection")
+                .required(false)
+                .multiple(false),
+        )
+        .get_matches();
+    let query = matches.value_of("QUERY");
+
+    let use_result = use_command::run(query.as_deref(), sdkman_candidates_dir())?;
     if let UseResult::Use {
         name,
         java_home,
