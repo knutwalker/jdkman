@@ -235,6 +235,8 @@ fn skim_select_one<T: SkimItem + Clone>(
     let options = SkimOptionsBuilder::default()
         .query(query.as_deref())
         .tac(tac)
+        .exact(true)
+        .prompt(Some(" "))
         .select1(true)
         .exit0(true)
         .build()
