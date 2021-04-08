@@ -323,8 +323,19 @@ fn skim_select_one<T: SkimItem + Clone>(
     // so that skim knows when to stop receiving
     drop(tx);
 
+    // Note that `java -version` prints to stderr and
+    // skim only shows stderr when the command fails.
+    // So we use `--version` instead, which is also more idiomatic.
+    let preview_command = format!(
+        "{0}/{{}}/bin/java --version; {0}/{{}}/bin/java -Xinternalversion",
+        sdkman_candidates_dir().display()
+    );
+
     let options = SkimOptionsBuilder::default()
         .query(query.as_deref())
+        .preview(Some(&preview_command))
+        .preview_window(Some("up:wrap:hidden"))
+        .bind(vec!["?:toggle-preview", "esc:cancel"])
         .tac(tac)
         .exact(true)
         .prompt(Some(" "))
