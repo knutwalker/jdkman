@@ -204,7 +204,7 @@ fn use_color() -> bool {
     *SDKMAN_COLOR_ENABLED.get_or_init(check_for_colors)
 }
 
-macro_rules! eprint_color {
+macro_rules! eprintln_color {
     ($color:path, $($arg:tt)*) => ({
         if use_color() {
             let text = ::std::fmt::format(format_args!($($arg)*));
@@ -215,8 +215,8 @@ macro_rules! eprint_color {
     })
 }
 
-macro_rules! eprint_green {
-    ($($arg:tt)*) => { eprint_color!(::ansi_term::Colour::Green, $($arg)*); }
+macro_rules! eprintln_green {
+    ($($arg:tt)*) => { eprintln_color!(::ansi_term::Colour::Green, $($arg)*); }
 }
 
 fn skim_select_one<T: SkimItem + Clone>(
@@ -281,7 +281,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + 'static>> {
         path,
     } = use_result
     {
-        eprint_green!("Using java version {} in this shell.", name);
+        eprintln_green!("Using java version {} in this shell.", name);
         println!("export JAVA_HOME=\"{}\"", java_home.display());
         if let Some(path) = path {
             let path = path.to_str().expect(r"Invalid PATH conversion to UTF-8. This is probably a Windows machine, sooooooo ¯\_(ツ)_/¯");
