@@ -2,7 +2,7 @@
 extern crate derivative;
 
 use clap::{App, AppSettings, Arg};
-use lenient_semver::Version;
+use lenient_semver::VersionBuilder;
 use once_cell::sync::OnceCell;
 use skim::{
     prelude::{bounded, SkimOptionsBuilder},
@@ -19,7 +19,7 @@ use use_command::UseResult;
 #[derive(Debug, Clone, Derivative)]
 #[derivative(PartialEq, Eq, PartialOrd, Ord)]
 struct Candidate {
-    version: Option<Version<'static>>,
+    version: Option<Version>,
     #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
     path: PathBuf,
 }
@@ -46,13 +46,42 @@ impl Candidate {
     }
 
     fn new(path: PathBuf) -> Self {
-        let version = lenient_semver::parse_into::<Version>(Self::name_from_path(&path))
-            .ok()
-            .map(|version| {
-                let (version, _, _) = version.disassociate_metadata::<'static>();
-                version
-            });
+        let version =
+            lenient_semver::parser::parse_partial::<Version>(Self::name_from_path(&*path))
+                .ok()
+                .map(|(v, _)| v);
         Self { version, path }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct Version {
+    major: u64,
+    minor: u64,
+    patch: u64,
+}
+
+impl VersionBuilder<'_> for Version {
+    type Out = Self;
+
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn build(self) -> Self::Out {
+        self
+    }
+
+    fn set_major(&mut self, major: u64) {
+        self.major = major;
+    }
+
+    fn set_minor(&mut self, minor: u64) {
+        self.minor = minor;
+    }
+
+    fn set_patch(&mut self, patch: u64) {
+        self.patch = patch;
     }
 }
 

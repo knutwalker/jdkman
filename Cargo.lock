@@ -449,28 +449,16 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "lenient_semver"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1e69422a47c615a5d4dc300df0aeceaf8db75316d7a96b80c41f1ae0d1c6e30"
+version = "0.3.1"
+source = "git+https://github.com/knutwalker/lenient-semver?branch=master#ab690dac65a3d2f7758a9cfd008723b3c97abc80"
 dependencies = [
  "lenient_semver_parser",
- "lenient_version",
 ]
 
 [[package]]
 name = "lenient_semver_parser"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7cb776fddcf01a2bf698446332a08b38ad591f93126f3d78880bd2e1900cbbe"
-
-[[package]]
-name = "lenient_version"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef893d69e6bbfcc137f1d9bc0f017d1dcad8085ec135a224718bd6ed0390e995"
-dependencies = [
- "lenient_semver_parser",
-]
+version = "0.3.1"
+source = "git+https://github.com/knutwalker/lenient-semver?branch=master#ab690dac65a3d2f7758a9cfd008723b3c97abc80"
 
 [[package]]
 name = "libc"
