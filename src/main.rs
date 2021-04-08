@@ -2,23 +2,117 @@
 extern crate derivative;
 
 use clap::{App, AppSettings, Arg};
+use lenient_semver::Version;
 use once_cell::sync::OnceCell;
 use skim::{
     prelude::{bounded, SkimOptionsBuilder},
     Skim, SkimItem, SkimItemReceiver, SkimItemSender,
 };
 use std::{
+    borrow::Cow,
     env, fs, io,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use use_command::UseResult;
 
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq, Eq, PartialOrd, Ord)]
+struct Candidate {
+    version: Option<Version<'static>>,
+    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
+    path: PathBuf,
+}
+
+impl SkimItem for Candidate {
+    fn text(&self) -> std::borrow::Cow<str> {
+        Cow::Borrowed(self.name())
+    }
+
+    fn display<'a>(&'a self, context: skim::DisplayContext<'a>) -> skim::AnsiString<'a> {
+        skim::AnsiString::from(context)
+    }
+}
+
+impl Candidate {
+    fn name(&self) -> &str {
+        Self::name_from_path(&self.path)
+    }
+
+    fn name_from_path(path: &Path) -> &str {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .expect("invalid filename")
+    }
+
+    fn new(path: PathBuf) -> Self {
+        let version = lenient_semver::parse_into::<Version>(Self::name_from_path(&path))
+            .ok()
+            .map(|version| {
+                let (version, _, _) = version.disassociate_metadata::<'static>();
+                version
+            });
+        Self { version, path }
+    }
+}
+
+mod current_command {
+    use crate::Candidate;
+    use std::{env, fs, path::Path};
+
+    pub(crate) fn run(candidates_dir: impl AsRef<Path>) -> Option<Candidate> {
+        let candidates_dir = candidates_dir.as_ref();
+
+        // try to find the currently enabled candidate in the PATH
+        // If path is empty None is returned
+        // If the candidate is not found, None is returned
+        // If the candidate appears multiple times, the first match is returned
+        //   as this is consistent with how the PATH would be searched
+        let path = env::var_os("PATH").unwrap_or_default();
+        env::split_paths(&path)
+            .find_map(|path| {
+                path.starts_with(candidates_dir)
+                    .then(|| {
+                        // we have a component that starts with the candidate but
+                        // we may have additional components in the path (such as /bin)
+                        // so we navigate the ancestors until the parent matches the candidates_dir
+                        // then we take the current path as the one that has the correct version
+
+                        path.ancestors()
+                            // ancestors always starts with the current path,
+                            //  but we're only interested in the actual parents
+                            .skip(1)
+                            // once a parent no longer starts with the candidate dir, we can stop searching
+                            .take_while(|path| path.starts_with(candidates_dir))
+                            .try_fold(&*path, |parent_parent, parent| {
+                                if parent == candidates_dir {
+                                    // try_fold short circuits when an Err is returned
+                                    Err(parent_parent)
+                                } else {
+                                    // if not found, we traverse up the ancestors chain
+                                    Ok(parent)
+                                }
+                            })
+                            // we're only interested in the found case, where we returned an error
+                            .err()
+                            .map(ToOwned::to_owned)
+                    })
+                    .flatten()
+            })
+            // Resolve any links, most likely
+            // resolve 'current' to where it actually points at.
+            // This already returns the correct absolute path that we want
+            // SDKman sets the links to relativ paths, so just using `std::fs::read_link`
+            // would only yield the version as the full path, not the full absolute path.
+            .map(fs::canonicalize)
+            .and_then(Result::ok)
+            .map(Candidate::new)
+    }
+}
+
 mod use_command {
-    use lenient_semver::Version;
-    use skim::SkimItem;
+    use crate::Candidate;
     use std::{
-        borrow::Cow,
         env,
         ffi::OsString,
         fs::{self, DirEntry},
@@ -86,49 +180,13 @@ mod use_command {
         Ok(use_result)
     }
 
-    #[derive(Debug, Clone, Derivative)]
-    #[derivative(PartialEq, Eq, PartialOrd, Ord)]
-    struct Candidate {
-        version: Option<Version<'static>>,
-        #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
-        path: PathBuf,
-    }
-
-    impl SkimItem for Candidate {
-        fn text(&self) -> std::borrow::Cow<str> {
-            Cow::Borrowed(self.name())
-        }
-    }
-
-    impl Candidate {
-        fn name(&self) -> &str {
-            Self::name_from_path(&self.path)
-        }
-
-        fn name_from_path(path: &Path) -> &str {
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .expect("invalid filename")
-        }
-
-        fn new(path: PathBuf) -> Self {
-            let version = lenient_semver::parse_into::<Version>(Self::name_from_path(&path))
-                .ok()
-                .map(|version| {
-                    let (version, _, _) = version.disassociate_metadata::<'static>();
-                    version
-                });
-            Self { version, path }
-        }
-    }
-
     fn read_entry(entry: io::Result<DirEntry>) -> Option<Candidate> {
         let entry = entry.ok()?;
 
-        // Check if that entry is not a directory.
-        // This is either a regular file or a symlink
-        // Files are generally skipped, symlinks could be useful
-        // with regard to alias handling. For now, we skip those as well.
+        // We are only interested in directories,
+        // the alternatives being files or symlinks.
+        // We only want to list actual files,
+        // not duplicate current or other symlinks
         entry
             .metadata()
             .ok()?
@@ -219,6 +277,10 @@ macro_rules! eprintln_green {
     ($($arg:tt)*) => { eprintln_color!(::ansi_term::Colour::Green, $($arg)*); }
 }
 
+macro_rules! eprintln_red {
+    ($($arg:tt)*) => { eprintln_color!(::ansi_term::Colour::Red, $($arg)*); }
+}
+
 fn skim_select_one<T: SkimItem + Clone>(
     items: Vec<T>,
     query: Option<&str>,
@@ -266,14 +328,28 @@ fn run() -> Result<(), Box<dyn std::error::Error + 'static>> {
         .setting(AppSettings::UnifiedHelpMessage)
         .setting(AppSettings::ColorAuto)
         .arg(
+            Arg::with_name("CURRENT")
+                .long("current")
+                .help("Only show the current version and quit"),
+        )
+        .arg(
             Arg::with_name("QUERY")
                 .help("Optional query to start a selection")
                 .required(false)
                 .multiple(false),
         )
         .get_matches();
-    let query = matches.value_of("QUERY");
 
+    let current = current_command::run(sdkman_candidates_dir());
+    if matches.is_present("CURRENT") {
+        match current {
+            Some(current) => eprintln!("Using java version {}", current.name()),
+            None => eprintln_red!("Not using any version of java"),
+        }
+        return Ok(());
+    }
+
+    let query = matches.value_of("QUERY");
     let use_result = use_command::run(query.as_deref(), sdkman_candidates_dir())?;
     if let UseResult::Use {
         name,
