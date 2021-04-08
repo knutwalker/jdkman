@@ -160,6 +160,7 @@ mod use_command {
 
     pub(crate) fn run(
         query: Option<&str>,
+        current: Option<&str>,
         candidates_dir: impl AsRef<Path>,
     ) -> io::Result<UseResult> {
         let candidates_dir = candidates_dir.as_ref();
@@ -170,7 +171,12 @@ mod use_command {
         // sort by version
         candidates.sort();
 
-        let selected = crate::skim_select_one(candidates, query, true);
+        // pre select whatever current points to
+        let pre_select = current
+            .and_then(|current| candidates.iter().position(|c| c.name() == current))
+            .map(|p| p as u32);
+
+        let selected = crate::skim_select_one(candidates, pre_select, query, true);
         let use_result = selected.map_or(UseResult::KeepCurrent, |selection| {
             let name = selection.name().to_string();
             let candidate_path = selection.path;
@@ -312,6 +318,7 @@ macro_rules! eprintln_red {
 
 fn skim_select_one<T: SkimItem + Clone>(
     items: Vec<T>,
+    pre_select: Option<u32>,
     query: Option<&str>,
     tac: bool,
 ) -> Option<T> {
@@ -332,10 +339,13 @@ fn skim_select_one<T: SkimItem + Clone>(
     );
 
     let options = SkimOptionsBuilder::default()
+        .pre_select(pre_select)
         .query(query.as_deref())
         .preview(Some(&preview_command))
         .preview_window(Some("up:wrap:hidden"))
         .bind(vec!["?:toggle-preview", "esc:cancel"])
+        .nosort(true)
+        .sync(true)
         .tac(tac)
         .exact(true)
         .prompt(Some(" "))
@@ -390,7 +400,11 @@ fn run() -> Result<(), Box<dyn std::error::Error + 'static>> {
     }
 
     let query = matches.value_of("QUERY");
-    let use_result = use_command::run(query.as_deref(), sdkman_candidates_dir())?;
+    let use_result = use_command::run(
+        query.as_deref(),
+        current.as_ref().map(Candidate::name),
+        sdkman_candidates_dir(),
+    )?;
     if let UseResult::Use {
         name,
         java_home,

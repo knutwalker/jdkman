@@ -31,3 +31,4 @@ rpath = false
 
 [patch.crates-io]
 lenient_semver = { git = "https://github.com/knutwalker/lenient-semver", package = "lenient_semver", branch = "master" }
+skim = { git = "https://github.com/knutwalker/skim", branch = "single-preselect" }
