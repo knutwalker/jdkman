@@ -372,11 +372,13 @@ fn skim_select_one<T: SkimItem + Clone>(
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error + 'static>> {
-    let matches = App::new(clap::crate_name!())
+    let app = App::new(clap::crate_name!())
         .version(clap::crate_version!())
         .about(clap::crate_description!())
         .setting(AppSettings::UnifiedHelpMessage)
         .setting(AppSettings::ColorAuto)
+        .setting(AppSettings::DisableVersion)
+        .setting(AppSettings::DisableHelpSubcommand)
         .arg(
             Arg::with_name("CURRENT")
                 .long("current")
@@ -387,8 +389,12 @@ fn run() -> Result<(), Box<dyn std::error::Error + 'static>> {
                 .help("Optional query to start a selection")
                 .required(false)
                 .multiple(false),
-        )
-        .get_matches();
+        );
+
+    let matches = app.get_matches_safe().unwrap_or_else(|e| {
+        eprintln!("{}", e.message);
+        std::process::exit(if e.use_stderr() { 1 } else { 0 })
+    });
 
     let current = current_command::run(sdkman_candidates_dir());
     if matches.is_present("CURRENT") {
