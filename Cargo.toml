@@ -11,7 +11,7 @@ categories = ["command-line-utilities"]
 keywords = ["sdkman", "jdk", "java"]
 
 [dependencies]
-ansi_term = "0.11"
+ansi_term = "0.12"
 clap = "2"
 clicolors-control = "1"
 derivative = "2"
