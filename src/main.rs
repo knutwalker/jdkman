@@ -2,7 +2,7 @@
 extern crate derivative;
 
 use clap::{App, AppSettings, Arg};
-use lenient_semver::VersionBuilder;
+use lenient_semver_parser::VersionBuilder;
 use once_cell::sync::OnceCell;
 use skim::{
     prelude::{bounded, SkimOptionsBuilder},
@@ -46,10 +46,9 @@ impl Candidate {
     }
 
     fn new(path: PathBuf) -> Self {
-        let version =
-            lenient_semver::parser::parse_partial::<Version>(Self::name_from_path(&*path))
-                .ok()
-                .map(|(v, _)| v);
+        let version = lenient_semver_parser::parse_partial::<Version>(Self::name_from_path(&*path))
+            .ok()
+            .map(|(v, _)| v);
         Self { version, path }
     }
 }

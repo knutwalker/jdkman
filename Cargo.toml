@@ -15,7 +15,7 @@ ansi_term = "0.11"
 clap = "2"
 clicolors-control = "1"
 derivative = "2"
-lenient_semver = { version = "0.3", default-features = false }
+lenient_semver_parser = { version = "0.3.1", default-features = false, features = ["partial"] }
 once_cell = "1"
 skim = "0.9"
 
@@ -30,5 +30,5 @@ panic = 'abort'
 rpath = false
 
 [patch.crates-io]
-lenient_semver = { git = "https://github.com/knutwalker/lenient-semver", package = "lenient_semver", branch = "master" }
+lenient_semver_parser = { git = "https://github.com/knutwalker/lenient-semver", package = "lenient_semver_parser", branch = "master" }
 skim = { git = "https://github.com/knutwalker/skim", branch = "single-preselect" }
