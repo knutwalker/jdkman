@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(crate) fn candidates_dir() -> &'static Path {
+pub fn candidates_dir() -> &'static Path {
     fn find() -> io::Result<PathBuf> {
         let candidates_dir = env::var_os("SDKMAN_CANDIDATES_DIR").ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "No sdkman installation found")

@@ -5,7 +5,7 @@ use std::{
 };
 
 #[derive(Debug, Eq)]
-pub(crate) struct Candidate {
+pub struct Candidate {
     version: Option<Version>,
     path: PathBuf,
 }
@@ -18,7 +18,7 @@ impl Candidate {
         Self { version, path }
     }
 
-    pub(crate) fn name(&self) -> &str {
+    pub fn name(&self) -> &str {
         Self::name_from_path(&self.path)
     }
 

@@ -1,8 +1,8 @@
-pub(crate) mod current_command {
+pub mod current_command {
     use crate::candidate::Candidate;
     use std::{env, fs, path::Path};
 
-    pub(crate) fn run(candidates_dir: impl AsRef<Path>) -> Option<Candidate> {
+    pub fn run(candidates_dir: impl AsRef<Path>) -> Option<Candidate> {
         let candidates_dir = candidates_dir.as_ref();
 
         // try to find the currently enabled candidate in the PATH
@@ -52,7 +52,7 @@ pub(crate) mod current_command {
     }
 }
 
-pub(crate) mod use_command {
+pub mod use_command {
     use crate::{
         candidate::Candidate,
         select::{SelectOptions, Selection},
@@ -65,7 +65,7 @@ pub(crate) mod use_command {
         path::{Path, PathBuf},
     };
 
-    pub(crate) enum UseResult {
+    pub enum UseResult {
         KeepCurrent,
         Invalid(Option<String>),
         Use {
@@ -75,7 +75,7 @@ pub(crate) mod use_command {
         },
     }
 
-    pub(crate) fn run(
+    pub fn run(
         query: Option<&OsStr>,
         current: Option<&str>,
         candidates_dir: impl AsRef<Path>,
