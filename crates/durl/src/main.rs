@@ -1,14 +1,11 @@
-use libdurl::{DurlClient, DurlRequestBuilder, DurlResult, ResponseTimings};
+use libdurl::{DurlClient, DurlRequestBuilder, DurlResult};
 use std::{error::Error, path::PathBuf};
 
 fn print_response(verbose: bool, response: DurlResult) {
     match response {
         Ok(response) => {
             if verbose {
-                println!("response = {:#?}", response);
-                if let Some(timings) = response.extensions().get::<ResponseTimings>() {
-                    println!("{:#?}", timings);
-                }
+                println!("{:#?}", response);
             }
         }
         Err(err) => eprintln!("error: {:#?}", err),

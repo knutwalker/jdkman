@@ -4,10 +4,6 @@ use curl::{
     multi::{Easy2Handle, Events, Multi, Socket, SocketEvents},
 };
 use curl_sys::CURL;
-use http::{
-    header::{HeaderName, HeaderValue},
-    Response, StatusCode, Version,
-};
 use libc::c_double;
 use libjdkman::{eprintln_color, eprintln_green, eprintln_red};
 use memmap::MmapMut;
@@ -50,11 +46,11 @@ struct ResponseError(Option<curl::Error>);
 struct CurlHandler {
     first_header_in: bool,
     read_content_length: bool,
+    is_redirect: bool,
     start: Instant,
     next_progress_at: f64,
     last_logged: Option<Instant>,
     content_length: Option<NonZeroUsize>,
-    response: Response<()>,
     output_file: File,
     output_path: PathBuf,
     use_mmap: bool,
@@ -127,14 +123,14 @@ impl CurlHandler {
         Ok(handle)
     }
 
-    fn perform(mut handle: Easy2<Self>) -> Result<Response<()>, curl::Error> {
+    fn perform(mut handle: Easy2<Self>) -> DurlResult {
         handle.get_mut().start = Instant::now();
         handle.perform()?;
         Self::finish_response(&mut handle)
     }
 
-    fn post_response(handle: &mut Easy2<Self>) -> Result<(), curl::Error> {
-        let timings = ResponseTimings {
+    fn finish_response(handle: &mut Easy2<Self>) -> DurlResult {
+        Ok(ResponseTimings {
             namelookup_time: handle.namelookup_time()?,
             connect_time: handle.connect_time()?,
             appconnect_time: handle.appconnect_time()?,
@@ -142,25 +138,18 @@ impl CurlHandler {
             starttransfer_time: handle.starttransfer_time()?,
             redirect_time: handle.redirect_time()?,
             total_time: handle.total_time()?,
-        };
-        handle.get_mut().add_to_response(timings);
-        Ok(())
-    }
-
-    fn finish_response(handle: &mut Easy2<Self>) -> DurlResult {
-        Self::post_response(handle)?;
-        Ok(handle.get_mut().take_response())
+        })
     }
 
     fn new(use_mmap: bool, output_path: PathBuf, output_file: File) -> Self {
         Self {
             first_header_in: true,
             read_content_length: false,
+            is_redirect: false,
             start: Instant::now(),
             next_progress_at: Self::PROGRESS_INTERVAL,
             last_logged: None,
             content_length: None,
-            response: Response::new(()),
             output_file,
             output_path,
             use_mmap,
@@ -172,14 +161,6 @@ impl CurlHandler {
     fn set_handle(&mut self, handle: *mut CURL) {
         assert!(!handle.is_null(), "curl is NULL (not init?)");
         self.curl_handle = handle;
-    }
-
-    fn add_to_response<T: Send + Sync + 'static>(&mut self, val: T) {
-        self.response.extensions_mut().insert(val);
-    }
-
-    fn take_response(&mut self) -> Response<()> {
-        mem::take(&mut self.response)
     }
 
     fn try_find_content_length(&mut self) -> Option<NonZeroUsize> {
@@ -208,7 +189,6 @@ impl CurlHandler {
                         // SAFETY: p is at least 1
                         NonZeroUsize::new_unchecked(p)
                     };
-                    self.response.extensions_mut().insert(p);
                     self.content_length = Some(p);
                     eprintln_green!("Found Content-Length: {}", p);
                 }
@@ -223,131 +203,43 @@ impl CurlHandler {
         self.content_length
     }
 
-    fn parse_header(&mut self, data: &[u8]) -> bool {
-        if let Some(split) = memchr::memchr(b':', data) {
-            let name = &data[..split];
-            let name = match HeaderName::from_bytes(name) {
-                Ok(name) => name,
-                Err(invalid) => {
-                    match std::str::from_utf8(name) {
-                        Ok(name) => {
-                            eprintln_red!("Invalid header name: {:?}: {}", name, invalid);
-                        }
-                        Err(_) => {
-                            eprintln_red!("Invalid header name: {:?}: {}", name, invalid);
-                        }
-                    }
-                    return false;
-                }
-            };
+    fn parse_status_line(&mut self, data: &[u8]) -> Option<()> {
+        let mut positions = data.iter();
 
-            let mut value = &data[split + 1..];
-            loop {
-                match value {
-                    [first, rest @ ..] if first.is_ascii_whitespace() => value = rest,
-                    [init @ .., last] if last.is_ascii_whitespace() => value = init,
-                    _ => break,
-                }
-            }
+        let version_len = positions.position(|&b| b == b' ')?;
+        let status_len = positions.position(|&b| b == b' ')?;
 
-            match HeaderValue::from_bytes(value) {
-                Ok(val) => {
-                    self.response.headers_mut().append(name, val);
-                }
-                Err(invalid) => {
-                    match std::str::from_utf8(value) {
-                        Ok(value) => {
-                            eprintln_red!(
-                                "Error decoding the header value for {}: {:?}: {}",
-                                name,
-                                value,
-                                invalid
-                            );
-                        }
-                        Err(_) => {
-                            eprintln_red!(
-                                "Error decoding the header value for {}: {:?}: {}",
-                                name,
-                                value,
-                                invalid
-                            );
-                        }
-                    }
-                    return false;
-                }
-            };
-            true
-        } else {
-            false
+        if status_len != 3 || version_len <= 5 {
+            return None;
         }
-    }
 
-    fn parse_status_line(&mut self, data: &[u8]) -> bool {
-        let mut positions = memchr::memchr_iter(b' ', data);
-        let start = 0;
-        let pos = match positions.next() {
-            Some(pos) => pos,
-            None => {
-                return false;
+        match &data[..version_len] {
+            b"HTTP/0.9" => {}
+            b"HTTP/1.0" | b"HTTP/1.1" => {}
+            b"HTTP/2" | b"HTTP/2.0" => {}
+            b"HTTP/3" | b"HTTP/3.0" => {}
+            _ => {
+                return None;
             }
         };
 
-        let version = match &data[start..pos] {
-            b"HTTP/0.9" => Version::HTTP_09,
-            b"HTTP/1.0" => Version::HTTP_10,
-            b"HTTP/1.1" => Version::HTTP_11,
-            b"HTTP/2" | b"HTTP/2.0" => Version::HTTP_2,
-            b"HTTP/3" | b"HTTP/3.0" => Version::HTTP_3,
-            unknown => {
-                match std::str::from_utf8(unknown) {
-                    Ok(unknown) => {
-                        eprintln_red!("Unknown http version: {:?}", unknown);
-                    }
-                    Err(_) => {
-                        eprintln_red!("Unknown http version: {:?}", unknown);
-                    }
-                }
-                return false;
-            }
+        let is_redirect = match data[version_len + 1..][..status_len] {
+            [b'1', y, z] if y.is_ascii_digit() && z.is_ascii_digit() => false,
+            [b'2', y, z] if y.is_ascii_digit() && z.is_ascii_digit() => false,
+            [b'3', y, z] if y.is_ascii_digit() && z.is_ascii_digit() => true,
+            [b'4', y, z] if y.is_ascii_digit() && z.is_ascii_digit() => false,
+            [b'5', y, z] if y.is_ascii_digit() && z.is_ascii_digit() => false,
+            _ => return None,
         };
+        self.is_redirect = is_redirect;
 
-        let start = pos + 1;
-        let pos = match positions.next() {
-            Some(pos) => pos,
-            None => {
-                eprintln_red!("Missing status code");
-                return false;
-            }
-        };
-
-        let status = &data[start..pos];
-        let status = match StatusCode::from_bytes(status) {
-            Ok(sc) => sc,
-            Err(invalid) => {
-                match std::str::from_utf8(status) {
-                    Ok(status) => {
-                        eprintln_red!("Invalid status code: {:?}: {}", status, invalid);
-                    }
-                    Err(_) => {
-                        eprintln_red!("Invalid status code: {:?}: {}", status, invalid);
-                    }
-                }
-                return false;
-            }
-        };
-
-        *self.response.version_mut() = version;
-        *self.response.status_mut() = status;
-
-        true
+        Some(())
     }
 }
 
 impl Handler for CurlHandler {
     fn write(&mut self, data: &[u8]) -> Result<usize, curl::easy::WriteError> {
-        if self.response.status().is_redirection() {
-            println!("write on redirect");
-            // self.first_header_in = true;
+        if self.is_redirect {
             return Ok(0);
         }
         if data.is_empty() {
@@ -414,23 +306,8 @@ impl Handler for CurlHandler {
     }
 
     fn header(&mut self, data: &[u8]) -> bool {
-        if self.parse_header(data) {
-            true
-        } else if self.parse_status_line(data) {
-            true
-        } else if data == b"\r\n" {
-            true
-        } else {
-            match std::str::from_utf8(data) {
-                Ok(data) => {
-                    eprintln_red!("Unexpected header: {:?}", data);
-                }
-                Err(_) => {
-                    eprintln_red!("Unexpected header: {:?}", data);
-                }
-            }
-            false
-        }
+        self.parse_status_line(data);
+        true
     }
 
     fn progress(&mut self, dltotal: f64, dlnow: f64, _ultotal: f64, _ulnow: f64) -> bool {
@@ -630,7 +507,7 @@ impl DurlRequestBuilder<'_, OutputStage> {
 }
 
 impl DurlRequest {
-    pub fn perform(self) -> Result<Response<()>> {
+    pub fn perform(self) -> DurlResult {
         Ok(CurlHandler::perform(self.0)?)
     }
 }
@@ -915,7 +792,7 @@ impl ActiveSockets {
     }
 }
 
-pub type DurlResult = Result<Response<()>, curl::Error>;
+pub type DurlResult = Result<ResponseTimings, curl::Error>;
 type DurlResultHandler = dyn FnOnce(DurlResult);
 
 struct RequestHandle {
