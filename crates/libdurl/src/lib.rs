@@ -74,7 +74,7 @@ impl Output {
         })
     }
 
-    fn write(self: &mut Self, mut data: &[u8]) -> io::Result<usize> {
+    fn write(&mut self, mut data: &[u8]) -> io::Result<usize> {
         let start = self.offset;
         let mut end = start + data.len();
 
@@ -312,7 +312,7 @@ impl Handler for CurlHandler {
 
     fn progress(&mut self, dltotal: f64, dlnow: f64, _ultotal: f64, _ulnow: f64) -> bool {
         if dltotal > 0.0 {
-            if dltotal == dlnow {
+            if (dltotal - dlnow).abs() < f64::EPSILON {
                 let elapsed = self.start.elapsed();
                 eprintln_color!(
                     console::Color::Blue,
@@ -402,7 +402,7 @@ impl DurlRequestBuilder<'static, Uninitialized> {
         }
     }
 
-    pub fn url<'url>(self, url: &'url str) -> DurlRequestBuilder<'url, UrlStage> {
+    pub fn url(self, url: &str) -> DurlRequestBuilder<UrlStage> {
         DurlRequestBuilder {
             url: Some(url),
             output: self.output,
@@ -506,9 +506,15 @@ impl DurlRequestBuilder<'_, OutputStage> {
     }
 }
 
+impl Default for DurlRequestBuilder<'static, Uninitialized> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DurlRequest {
     pub fn perform(self) -> DurlResult {
-        Ok(CurlHandler::perform(self.0)?)
+        CurlHandler::perform(self.0)
     }
 }
 
@@ -528,19 +534,19 @@ impl SocketInterest {
         self.socket
     }
 
-    fn as_new(self) -> Self {
+    fn to_new(self) -> Self {
         Self { new: true, ..self }
     }
 
-    fn as_known(self) -> Self {
+    fn to_known(self) -> Self {
         Self { new: false, ..self }
     }
 
-    fn as_dead(self) -> Self {
+    fn to_dead(self) -> Self {
         Self { dead: true, ..self }
     }
 
-    fn to_fired(&mut self) {
+    fn as_fired(&mut self) {
         *self = Self {
             update: true,
             ..*self
@@ -659,7 +665,7 @@ impl ActiveSockets {
             match self.socket_updates.try_recv() {
                 Ok(sock) => match self.sockets.entry(sock.socket()) {
                     Entry::Vacant(lhs) => {
-                        lhs.insert(sock.as_new());
+                        lhs.insert(sock.to_new());
                     }
                     Entry::Occupied(mut lhs) => {
                         lhs.get_mut().merge(sock);
@@ -669,7 +675,7 @@ impl ActiveSockets {
                 Err(_) => {
                     // disconnect (client dropped), register all sockets for removal
                     for socket in self.sockets.values_mut() {
-                        *socket = socket.as_dead()
+                        *socket = socket.to_dead()
                     }
                     return;
                 }
@@ -697,11 +703,11 @@ impl ActiveSockets {
     fn ok_or_kill(result: io::Result<()>, socket: &mut SocketInterest) -> io::Result<()> {
         match result {
             Ok(_) => {
-                *socket = socket.as_known();
+                *socket = socket.to_known();
                 Ok(())
             }
             Err(e) if Self::is_bad_socket_error(&e) => {
-                *socket = socket.as_dead();
+                *socket = socket.to_dead();
                 Ok(())
             }
             result => result,
@@ -714,13 +720,13 @@ impl ActiveSockets {
                 return Err(e);
             }
         }
-        *socket = socket.as_dead();
+        *socket = socket.to_dead();
         Ok(())
     }
 
     fn add_socket(poller: &Poller, socket: SocketInterest) -> io::Result<()> {
         if let Err(e) = poller.add(socket.socket(), socket.into()) {
-            if let Err(_) = poller.modify(socket.socket(), socket.into()) {
+            if poller.modify(socket.socket(), socket.into()).is_err() {
                 return Err(e);
             }
         }
@@ -730,7 +736,7 @@ impl ActiveSockets {
 
     fn modify_socket(poller: &Poller, socket: SocketInterest) -> io::Result<()> {
         if let Err(e) = poller.modify(socket.socket(), socket.into()) {
-            if let Err(_) = poller.add(socket.socket(), socket.into()) {
+            if poller.add(socket.socket(), socket.into()).is_err() {
                 return Err(e);
             }
         }
@@ -738,7 +744,6 @@ impl ActiveSockets {
         Ok(())
     }
 
-    #[must_use]
     fn poll(
         &mut self,
         timeout: Duration,
@@ -746,7 +751,6 @@ impl ActiveSockets {
         Self::inner_poll(&self.poller, &mut self.events, &mut self.sockets, timeout)
     }
 
-    #[must_use]
     fn inner_poll<'a>(
         poller: &'a Poller,
         events: &'a mut Vec<Event>,
@@ -758,7 +762,7 @@ impl ActiveSockets {
             Err(e) if e.kind() == io::ErrorKind::Interrupted => Ok(None),
             Err(e) => Err(e),
             Ok(_) => Ok(Some(events.drain(..).map(move |e| {
-                sockets.get_mut(&(e.key as Socket)).unwrap().to_fired();
+                sockets.get_mut(&(e.key as Socket)).unwrap().as_fired();
                 e.into()
             }))),
         }
