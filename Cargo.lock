@@ -100,7 +100,9 @@ dependencies = [
 name = "durl"
 version = "0.1.0"
 dependencies = [
+ "console",
  "libdurl",
+ "libjdkman",
  "pico-args",
 ]
 

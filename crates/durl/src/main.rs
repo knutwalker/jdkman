@@ -1,4 +1,5 @@
 use libdurl::{DurlClient, DurlRequestBuilder, DurlResult};
+use libjdkman::eprintln_red;
 use std::{error::Error, path::PathBuf};
 
 fn print_response(verbose: bool, response: DurlResult) {
@@ -8,7 +9,9 @@ fn print_response(verbose: bool, response: DurlResult) {
                 println!("{:#?}", response);
             }
         }
-        Err(err) => eprintln!("error: {:#?}", err),
+        Err(err) => {
+            eprintln_red!("{}", err);
+        }
     }
 }
 
