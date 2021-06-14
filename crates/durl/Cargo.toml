@@ -13,11 +13,12 @@ resolver = "2"
 workspace = "../.."
 
 [dependencies]
-libdurl = { path = "../libdurl"}
-libjdkman = { path = "../libjdkman"}
 console = { version = "0.14", default-features = false }
+libdurl = { path = "../libdurl", features = [ "indicatif" ]}
+libjdkman = { path = "../libjdkman"}
+number_prefix = "0.4"
 pico-args = "0.4"
-ubyte = "0.10"
+
 # bitvec = "0.22"
 # chrono = "0.4"
 # clicolors-control = "1"
@@ -36,7 +37,7 @@ ubyte = "0.10"
 # polling = "2"
 # slab = "0.4"
 # smallvec = "1"
-
+# ubyte = "0.10"
 # sluice = "0.5"
 # url = "2"
 # waker-fn = "1"

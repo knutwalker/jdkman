@@ -1,6 +1,7 @@
-use console::{Color, Style};
-use libdurl::{DurlClient, DurlRequestBuilder, DurlResult, VerboseMessage};
+use console::Style;
+use libdurl::{DurlRequestBuilder, DurlResult, VerboseMessage};
 use libjdkman::{eprint_color, eprintln_color, eprintln_red};
+use number_prefix::NumberPrefix;
 use std::{error::Error, path::PathBuf, time::Duration};
 
 fn print_response(verbose: bool, response: DurlResult) {
@@ -16,23 +17,78 @@ fn print_response(verbose: bool, response: DurlResult) {
     }
 }
 
+fn print_verbose(msg: VerboseMessage, data: &[u8]) {
+    let style = match msg {
+        VerboseMessage::Text => Style::new().for_stderr().dim(),
+        VerboseMessage::OutgoingHeader => Style::new().for_stderr().dim().magenta(),
+        VerboseMessage::FirstIncomingHeader => Style::new().for_stderr().green(),
+        VerboseMessage::IncomingHeader => Style::new().for_stderr().cyan(),
+    };
+    match std::str::from_utf8(data) {
+        Ok(s) => eprint_color!(@style, "{}", s),
+        Err(_) => eprint_color!(@style.red(), "({} bytes of data)", data.len()),
+    }
+}
+
 fn print_progress(now: u64, total: u64, elapsed: Duration) {
     if now == total {
-        eprintln_color!(
-            console::Color::Blue,
-            "[{:?}] done: download {}",
-            elapsed,
-            ubyte::ByteUnit::Byte(total)
-        );
+        match NumberPrefix::binary(total as f64) {
+            NumberPrefix::Standalone(total) => {
+                eprintln_color!(
+                    console::Color::Blue,
+                    "[{:?}] done: download {} bytes",
+                    elapsed,
+                    total
+                );
+            }
+            NumberPrefix::Prefixed(prefix, total) => {
+                eprintln_color!(
+                    console::Color::Blue,
+                    "[{:?}] done: download {:.2}{}B",
+                    elapsed,
+                    total,
+                    prefix
+                );
+            }
+        }
     } else if total > 0 {
-        eprintln_color!(
-            console::Color::Blue,
-            "[{:?}] download: {:5.2}% {}/{}",
-            elapsed,
-            (now as f64) / (total as f64) * 100.0,
-            ubyte::ByteUnit::Byte(now),
-            ubyte::ByteUnit::Byte(total),
-        );
+        match NumberPrefix::binary(total as f64) {
+            NumberPrefix::Standalone(total) => {
+                eprintln_color!(
+                    console::Color::Blue,
+                    "[{:?}] download: {:5.2}% {}/{} bytes",
+                    elapsed,
+                    (now as f64) / total * 100.0,
+                    now,
+                    total,
+                );
+            }
+            NumberPrefix::Prefixed(prefix, total) => match NumberPrefix::binary(now as f64) {
+                NumberPrefix::Standalone(now) => {
+                    eprintln_color!(
+                        console::Color::Blue,
+                        "[{:?}] download: {:5.2}% {} bytes/{:.2}{}B",
+                        elapsed,
+                        now / total * 100.0,
+                        now,
+                        total,
+                        prefix,
+                    );
+                }
+                NumberPrefix::Prefixed(now_prefix, now) => {
+                    eprintln_color!(
+                        console::Color::Blue,
+                        "[{:?}] download: {:5.2}% {:.2}{}B/{:.2}{}B",
+                        elapsed,
+                        now / total * 100.0,
+                        now,
+                        now_prefix,
+                        total,
+                        prefix,
+                    );
+                }
+            },
+        }
     } else {
         eprintln_color!(
             console::Color::Blue,
@@ -41,29 +97,6 @@ fn print_progress(now: u64, total: u64, elapsed: Duration) {
             now
         );
     };
-}
-
-fn print_verbose(msg: VerboseMessage, data: &[u8]) {
-    let style = match msg {
-        VerboseMessage::Text => Style::new().for_stderr().dim(),
-        VerboseMessage::OutgoingHeader => Style::new().for_stderr().dim().magenta(),
-        VerboseMessage::FirstIncomingHeader => {
-            Style::new()
-                .for_stderr()
-                .bold()
-                .fg(if true { Color::Green } else { Color::Cyan })
-        }
-        VerboseMessage::IncomingHeader => {
-            Style::new()
-                .for_stderr()
-                .bold()
-                .fg(if false { Color::Green } else { Color::Cyan })
-        }
-    };
-    match std::str::from_utf8(data) {
-        Ok(s) => eprint_color!(@style, "{}", s),
-        Err(_) => eprint_color!(@style.red(), "({} bytes of data)", data.len()),
-    }
 }
 
 fn print_help() {
@@ -85,7 +118,6 @@ OPTIONS:
     -p, --progress   Prints progress during downloading
     -f, --force      Overwrite the output file if it exists
     -o, --output     The output file
-        --mmap       Uuse memory mapping for writing the file
     -h, --help       Prints this help information on stderr
 
 ARGS:
@@ -105,7 +137,6 @@ fn run() -> Result<(), Box<dyn Error>> {
     let verbose_flag = args.contains(["-v", "--verbose"]);
     let progress_flag = args.contains(["-p", "--progress"]);
     let force_flag = args.contains(["-f", "--force"]);
-    let use_mmap = args.contains("--mmap");
 
     let output = args.value_from_os_str(["-o", "--output"], |s| -> Result<_, String> {
         Ok(PathBuf::from(s))
@@ -140,29 +171,31 @@ For more information try --help
 
     if progress_flag {
         request
-            .progress_fn(print_progress)
-            .progress_interval(Duration::from_millis(500));
+            .progress_bar()
+            .progress_min_download(100_u64 << 10)
+            .progress_interval(Duration::from_millis(50));
     }
 
     if verbose_flag {
         request.verbose_fn(print_verbose);
+        if !progress_flag {
+            request.progress_fn(print_progress);
+        }
     }
 
     let request = request
         .overwrite_target(force_flag)
-        .use_mmap(use_mmap)
         .url(&url)
         .output(output)
         .build()?;
 
     // print version line
     if verbose_flag {
-        DurlClient::print_version();
+        libdurl::print_version();
     }
 
-    let mut client = DurlClient::new()?;
-    client.add_request(request, move |res| print_response(verbose_flag, res))?;
-    client.send_all()?;
+    let response = request.perform();
+    print_response(verbose_flag, response);
 
     Ok(())
 }

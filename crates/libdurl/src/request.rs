@@ -2,6 +2,7 @@ use crate::Result;
 use curl::easy::{Auth, Easy2, Handler, InfoType};
 use curl_sys::CURL;
 use libc::c_double;
+#[cfg(feature = "memmap")]
 use memmap::MmapMut;
 use std::{
     fmt::{Debug, Display},
@@ -24,6 +25,7 @@ pub enum BuildStage {}
 
 pub struct DurlRequestBuilder<'url, Stage> {
     overwrite_target: bool,
+    #[cfg(feature = "memmap")]
     use_mmap: bool,
 
     progress_interval: Duration,
@@ -44,6 +46,7 @@ impl<S> DurlRequestBuilder<'_, S> {
         self
     }
 
+    #[cfg(feature = "memmap")]
     pub fn use_mmap(&mut self, use_mmap: bool) -> &mut Self {
         self.use_mmap = use_mmap;
         self
@@ -72,6 +75,12 @@ impl<S> DurlRequestBuilder<'_, S> {
         self
     }
 
+    #[cfg(feature = "indicatif")]
+    pub fn progress_bar(&mut self) -> &mut Self {
+        self.progress_fn = Some(Box::new(progress_bar::DurlProgress::new()));
+        self
+    }
+
     pub fn progress_interval(&mut self, interval: Duration) -> &mut Self {
         self.progress_interval = interval;
         self
@@ -87,6 +96,7 @@ impl DurlRequestBuilder<'static, Uninitialized> {
     pub fn new() -> Self {
         DurlRequestBuilder {
             overwrite_target: false,
+            #[cfg(feature = "memmap")]
             use_mmap: true,
             progress_interval: Duration::from_secs(1),
             progress_min_download: 1 << 20,
@@ -101,6 +111,7 @@ impl DurlRequestBuilder<'static, Uninitialized> {
     pub fn url<'url>(&mut self, url: &'url str) -> DurlRequestBuilder<'url, OutputStage> {
         DurlRequestBuilder {
             overwrite_target: self.overwrite_target,
+            #[cfg(feature = "memmap")]
             use_mmap: self.use_mmap,
             progress_interval: self.progress_interval,
             progress_min_download: self.progress_min_download,
@@ -117,6 +128,7 @@ impl<'url> DurlRequestBuilder<'url, OutputStage> {
     pub fn output(&mut self, output: impl Into<PathBuf>) -> DurlRequestBuilder<'url, BuildStage> {
         DurlRequestBuilder {
             overwrite_target: self.overwrite_target,
+            #[cfg(feature = "memmap")]
             use_mmap: self.use_mmap,
             progress_interval: self.progress_interval,
             progress_min_download: self.progress_min_download,
@@ -135,6 +147,7 @@ impl DurlRequestBuilder<'_, BuildStage> {
             self.url.take().unwrap(),
             self.output.take().unwrap(),
             self.overwrite_target,
+            #[cfg(feature = "memmap")]
             self.use_mmap,
             self.verbose_fn.take(),
             self.progress_fn
@@ -176,6 +189,7 @@ pub(crate) struct DurlRequestHandler {
     first_header_in: bool,
     read_content_length: bool,
     is_redirect: bool,
+    #[cfg(feature = "memmap")]
     use_mmap: bool,
     content_length: Option<NonZeroUsize>,
     error: Option<RequestError>,
@@ -208,6 +222,7 @@ pub enum RequestError {
         path: PathBuf,
         error: io::Error,
     },
+    #[cfg(feature = "memmap")]
     MemoryMapFailed {
         length: usize,
         path: PathBuf,
@@ -229,9 +244,11 @@ struct ResponseProgress {
 struct ResponseOutput {
     path: Option<PathBuf>,
     file: File,
+    #[cfg(feature = "memmap")]
     map: Option<MappedFile>,
 }
 
+#[cfg(feature = "memmap")]
 struct MappedFile {
     map: MmapMut,
     offset: usize,
@@ -243,7 +260,7 @@ impl DurlRequest {
         url: &str,
         path: PathBuf,
         overwrite_target: bool,
-        use_mmap: bool,
+        #[cfg(feature = "memmap")] use_mmap: bool,
         verbose_fn: Option<Box<dyn VerboseHandler>>,
         progress_fn: Option<(Duration, u64, Box<dyn ProgressHandler>)>,
     ) -> io::Result<Self> {
@@ -251,6 +268,7 @@ impl DurlRequest {
             url,
             path,
             overwrite_target,
+            #[cfg(feature = "memmap")]
             use_mmap,
             verbose_fn,
             progress_fn,
@@ -268,7 +286,7 @@ impl DurlRequestHandler {
         url: &str,
         path: PathBuf,
         overwrite_target: bool,
-        use_mmap: bool,
+        #[cfg(feature = "memmap")] use_mmap: bool,
         verbose_fn: Option<Box<dyn VerboseHandler>>,
         progress_fn: Option<(Duration, u64, Box<dyn ProgressHandler>)>,
     ) -> io::Result<Easy2<Self>> {
@@ -280,6 +298,7 @@ impl DurlRequestHandler {
             first_header_in: true,
             read_content_length: false,
             is_redirect: false,
+            #[cfg(feature = "memmap")]
             use_mmap,
             content_length: None,
             error: None,
@@ -467,11 +486,16 @@ impl ResponseOutput {
         Ok(ResponseOutput {
             path: Some(path),
             file,
+            #[cfg(feature = "memmap")]
             map: None,
         })
     }
 
-    fn open(&mut self, use_mmap: bool, length: usize) -> Result<(), Option<RequestError>> {
+    fn open(
+        &mut self,
+        #[cfg(feature = "memmap")] use_mmap: bool,
+        length: usize,
+    ) -> Result<(), Option<RequestError>> {
         if let Err(error) = self.file.set_len(length as u64) {
             return Err(self.path.take().map(|path| RequestError::SetLengthFailed {
                 length,
@@ -479,6 +503,7 @@ impl ResponseOutput {
                 error,
             }));
         }
+        #[cfg(feature = "memmap")]
         if use_mmap {
             let output = match MappedFile::new(&self.file, length) {
                 Ok(output) => output,
@@ -495,21 +520,39 @@ impl ResponseOutput {
         Ok(())
     }
 
+    #[cfg(not(feature = "memmap"))]
     fn write(&mut self, data: &[u8]) -> Result<usize, Option<RequestError>> {
+        self.write_file(data)
+    }
+
+    #[cfg(feature = "memmap")]
+    fn write(&mut self, data: &[u8]) -> Result<usize, Option<RequestError>> {
+        self.write_mapped(data)
+    }
+
+    #[inline]
+    fn write_file(&mut self, data: &[u8]) -> Result<usize, Option<RequestError>> {
+        match self.file.write_all(data) {
+            Ok(_) => Ok(data.len()),
+            Err(error) => Err(self.path.take().map(|path| RequestError::FileWriteFailed {
+                length: data.len(),
+                path,
+                error,
+            })),
+        }
+    }
+
+    #[cfg(feature = "memmap")]
+    #[inline]
+    fn write_mapped(&mut self, data: &[u8]) -> Result<usize, Option<RequestError>> {
         match &mut self.map {
             Some(output) => Ok(output.write(data)),
-            None => match self.file.write_all(data) {
-                Ok(_) => Ok(data.len()),
-                Err(error) => Err(self.path.take().map(|path| RequestError::FileWriteFailed {
-                    length: data.len(),
-                    path,
-                    error,
-                })),
-            },
+            None => self.write_file(data),
         }
     }
 }
 
+#[cfg(feature = "memmap")]
 impl MappedFile {
     fn new(file: &File, len: usize) -> io::Result<Self> {
         Ok(MappedFile {
@@ -579,7 +622,11 @@ impl Handler for DurlRequestHandler {
         }
         // read content length at first data packet and open file for writing
         if let Some(cl) = self.try_find_content_length() {
-            if let Err(error) = self.output.open(self.use_mmap, cl.get()) {
+            if let Err(error) = self.output.open(
+                #[cfg(feature = "memmap")]
+                self.use_mmap,
+                cl.get(),
+            ) {
                 self.set_error(error);
                 // signal error to curl
                 return Ok(0);
@@ -659,6 +706,7 @@ impl Display for RequestError {
                 length,
                 error
             )),
+            #[cfg(feature = "memmap")]
             RequestError::MemoryMapFailed {
                 length,
                 path,
@@ -692,6 +740,7 @@ impl std::error::Error for RequestError {
         match self {
             RequestError::SetLengthFailed { error, .. } => Some(error),
             RequestError::FileWriteFailed { error, .. } => Some(error),
+            #[cfg(feature = "memmap")]
             RequestError::MemoryMapFailed { error, .. } => Some(error),
             RequestError::CurlError(error) => Some(error),
             RequestError::MultiError(errors) => errors.iter().find_map(|e| e.source()),
@@ -743,5 +792,41 @@ where
 
     fn done(&mut self, total: u64, elapsed: Duration) {
         self.0(total, total, elapsed)
+    }
+}
+
+#[cfg(feature = "indicatif")]
+mod progress_bar {
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
+    pub(super) struct DurlProgress {
+        pb: Option<ProgressBar>,
+    }
+
+    impl DurlProgress {
+        pub(super) fn new() -> Self {
+            DurlProgress { pb: None }
+        }
+    }
+
+    impl super::ProgressHandler for DurlProgress {
+        fn progress(&mut self, now: u64, total: u64, _elapsed: Duration) {
+            let pb = self.pb.get_or_insert_with(|| {
+                let style = ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+                    .progress_chars("#>-");
+                let pb = ProgressBar::new(total);
+                pb.set_style(style);
+                pb
+            });
+            pb.set_position(now);
+        }
+
+        fn done(&mut self, _total: u64, _elapsed: Duration) {
+            if let Some(pb) = self.pb.take() {
+                pb.finish_with_message("done");
+            }
+        }
     }
 }
