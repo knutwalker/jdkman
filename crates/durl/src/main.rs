@@ -24,25 +24,23 @@ fn print_progress(now: u64, total: u64, elapsed: Duration) {
             elapsed,
             ubyte::ByteUnit::Byte(total)
         );
+    } else if total > 0 {
+        eprintln_color!(
+            console::Color::Blue,
+            "[{:?}] download: {:5.2}% {}/{}",
+            elapsed,
+            (now as f64) / (total as f64) * 100.0,
+            ubyte::ByteUnit::Byte(now),
+            ubyte::ByteUnit::Byte(total),
+        );
     } else {
-        if total > 0 {
-            eprintln_color!(
-                console::Color::Blue,
-                "[{:?}] download: {:5.2}% {}/{}",
-                elapsed,
-                (now as f64) / (total as f64) * 100.0,
-                ubyte::ByteUnit::Byte(now),
-                ubyte::ByteUnit::Byte(total),
-            );
-        } else {
-            eprintln_color!(
-                console::Color::Blue,
-                "[{:?}] progress: download: {}",
-                elapsed,
-                now
-            );
-        };
-    }
+        eprintln_color!(
+            console::Color::Blue,
+            "[{:?}] progress: download: {}",
+            elapsed,
+            now
+        );
+    };
 }
 
 fn print_verbose(msg: VerboseMessage, data: &[u8]) {

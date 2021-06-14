@@ -126,7 +126,7 @@ impl From<polling::Event> for SocketInterest {
 
 impl From<SocketInterest> for polling::Event {
     fn from(val: SocketInterest) -> Self {
-        Self {
+        polling::Event {
             key: val.socket() as usize,
             readable: val.read,
             writable: val.write,
@@ -143,11 +143,10 @@ pub(crate) struct ActiveSockets {
 
 impl ActiveSockets {
     pub(crate) fn new(socket_updates: Receiver<SocketInterest>) -> Result<Self> {
-        let poller = Poller::new()?;
-        Ok(Self {
+        Ok(ActiveSockets {
             socket_updates,
             sockets: Default::default(),
-            poller,
+            poller: Poller::new()?,
             events: Default::default(),
         })
     }

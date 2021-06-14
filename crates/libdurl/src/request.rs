@@ -85,29 +85,29 @@ impl<S> DurlRequestBuilder<'_, S> {
 
 impl DurlRequestBuilder<'static, Uninitialized> {
     pub fn new() -> Self {
-        Self {
-            url: None,
-            output: None,
+        DurlRequestBuilder {
             overwrite_target: false,
             use_mmap: true,
             progress_interval: Duration::from_secs(1),
             progress_min_download: 1 << 20,
-            _stage: PhantomData,
-            verbose_fn: None,
             progress_fn: None,
+            verbose_fn: None,
+            url: None,
+            output: None,
+            _stage: PhantomData,
         }
     }
 
     pub fn url<'url>(&mut self, url: &'url str) -> DurlRequestBuilder<'url, OutputStage> {
         DurlRequestBuilder {
-            url: Some(url),
-            output: None,
             overwrite_target: self.overwrite_target,
             use_mmap: self.use_mmap,
-            verbose_fn: self.verbose_fn.take(),
-            progress_fn: self.progress_fn.take(),
             progress_interval: self.progress_interval,
             progress_min_download: self.progress_min_download,
+            progress_fn: self.progress_fn.take(),
+            verbose_fn: self.verbose_fn.take(),
+            url: Some(url),
+            output: None,
             _stage: PhantomData,
         }
     }
@@ -116,14 +116,14 @@ impl DurlRequestBuilder<'static, Uninitialized> {
 impl<'url> DurlRequestBuilder<'url, OutputStage> {
     pub fn output(&mut self, output: impl Into<PathBuf>) -> DurlRequestBuilder<'url, BuildStage> {
         DurlRequestBuilder {
-            url: self.url.take(),
-            output: Some(output.into()),
             overwrite_target: self.overwrite_target,
             use_mmap: self.use_mmap,
-            verbose_fn: self.verbose_fn.take(),
-            progress_fn: self.progress_fn.take(),
             progress_interval: self.progress_interval,
             progress_min_download: self.progress_min_download,
+            progress_fn: self.progress_fn.take(),
+            verbose_fn: self.verbose_fn.take(),
+            url: self.url.take(),
+            output: Some(output.into()),
             _stage: PhantomData,
         }
     }
@@ -136,10 +136,10 @@ impl DurlRequestBuilder<'_, BuildStage> {
             self.output.take().unwrap(),
             self.overwrite_target,
             self.use_mmap,
-            self.progress_interval,
-            self.progress_min_download,
             self.verbose_fn.take(),
-            self.progress_fn.take(),
+            self.progress_fn
+                .take()
+                .map(|f| (self.progress_interval, self.progress_min_download, f)),
         )?)
     }
 }
@@ -244,18 +244,14 @@ impl DurlRequest {
         path: PathBuf,
         overwrite_target: bool,
         use_mmap: bool,
-        progress_interval: Duration,
-        progress_min_download: u64,
         verbose_fn: Option<Box<dyn VerboseHandler>>,
-        progress_fn: Option<Box<dyn ProgressHandler>>,
+        progress_fn: Option<(Duration, u64, Box<dyn ProgressHandler>)>,
     ) -> io::Result<Self> {
         let handle = DurlRequestHandler::new(
             url,
             path,
             overwrite_target,
             use_mmap,
-            progress_interval,
-            progress_min_download,
             verbose_fn,
             progress_fn,
         )?;
@@ -273,10 +269,8 @@ impl DurlRequestHandler {
         path: PathBuf,
         overwrite_target: bool,
         use_mmap: bool,
-        progress_interval: Duration,
-        progress_min_download: u64,
         verbose_fn: Option<Box<dyn VerboseHandler>>,
-        progress_fn: Option<Box<dyn ProgressHandler>>,
+        progress_fn: Option<(Duration, u64, Box<dyn ProgressHandler>)>,
     ) -> io::Result<Easy2<Self>> {
         let verbose = verbose_fn.is_some();
         let progress = progress_fn.is_some();
@@ -290,8 +284,7 @@ impl DurlRequestHandler {
             content_length: None,
             error: None,
             verbose: verbose_fn,
-            progress: progress_fn
-                .map(|f| ResponseProgress::new(progress_interval, progress_min_download, f)),
+            progress: progress_fn.map(ResponseProgress::new),
             output,
             curl_handle: std::ptr::null_mut(),
         };
@@ -442,7 +435,7 @@ impl DurlRequestHandler {
         Some(())
     }
 
-    fn set_error(&mut self, error: Option<RequestError>) {
+    pub(crate) fn set_error(&mut self, error: Option<RequestError>) {
         if let Some(error) = error {
             let error = match self.error.take() {
                 Some(previous) => match previous {
@@ -471,7 +464,7 @@ impl ResponseOutput {
         };
 
         let file = options.open(&path)?;
-        Ok(Self {
+        Ok(ResponseOutput {
             path: Some(path),
             file,
             map: None,
@@ -519,9 +512,8 @@ impl ResponseOutput {
 
 impl MappedFile {
     fn new(file: &File, len: usize) -> io::Result<Self> {
-        let map = unsafe { MmapMut::map_mut(file) }?;
-        Ok(Self {
-            map,
+        Ok(MappedFile {
+            map: unsafe { MmapMut::map_mut(file) }?,
             offset: 0,
             len,
         })
@@ -544,15 +536,17 @@ impl MappedFile {
 }
 
 impl ResponseProgress {
-    fn new(interval: Duration, min_progress: u64, progress_fn: Box<dyn ProgressHandler>) -> Self {
+    fn new(
+        (interval, min_progress, progress_fn): (Duration, u64, Box<dyn ProgressHandler>),
+    ) -> Self {
         let start = Instant::now();
-        Self {
+        ResponseProgress {
             start,
             last_progress_at: start,
-            interval,
-            progress_fn,
             last_progress: 0,
+            interval,
             min_progress,
+            progress_fn,
         }
     }
 
@@ -597,7 +591,7 @@ impl Handler for DurlRequestHandler {
             Err(error) => {
                 self.set_error(error);
                 // signal error to curl
-                return Ok(0);
+                Ok(0)
             }
         }
     }

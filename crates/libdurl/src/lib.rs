@@ -23,7 +23,6 @@ type DurlResultCallback = dyn FnOnce(DurlResult);
 
 struct RequestHandle {
     handle: Easy2Handle<DurlRequestHandler>,
-    error: Option<curl::Error>,
     callback: Option<Box<DurlResultCallback>>,
 }
 
@@ -97,12 +96,7 @@ impl DurlClient {
         let mut handle = self.multi.add2(req.0)?;
         handle.set_token(id)?;
 
-        let handle = RequestHandle {
-            handle,
-            callback,
-            error: None,
-        };
-
+        let handle = RequestHandle { handle, callback };
         entry.insert(handle);
         Ok(())
     }
@@ -162,26 +156,18 @@ impl DurlClient {
                     }
                 };
                 if let Some(done) = message.result_for2(&req.handle) {
-                    req.error = done.err();
+                    req.handle.get_mut().set_error(done.err().map(From::from));
                     finished.insert(token);
                 }
             }
         });
 
         for token in finished.drain() {
-            let RequestHandle {
-                handle,
-                error,
-                callback,
-            } = requests.remove(token);
+            let RequestHandle { handle, callback } = requests.remove(token);
 
             let handle = self.multi.remove2(handle)?;
             if let Some(callback) = callback {
-                let result = match error {
-                    Some(err) => Err(RequestError::CurlError(err)),
-                    None => DurlRequestHandler::finish_response(handle),
-                };
-                callback(result);
+                callback(DurlRequestHandler::finish_response(handle));
             }
         }
 
