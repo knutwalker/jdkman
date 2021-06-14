@@ -13,18 +13,12 @@ resolver = "2"
 workspace = "../.."
 
 [dependencies]
-libjdkman = { path = "../libjdkman"}
 curl-sys = "0.4"
 libc = "0.2"
 memmap = "0.7"
 nohash-hasher = "0.2.0"
 polling = "2"
 slab = "0.4"
-ubyte = "0.10"
-
-[dependencies.console]
-version = "0.14"
-default-features = false
 
 [dependencies.curl]
 version = "0.4"

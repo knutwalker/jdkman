@@ -13,7 +13,10 @@ use std::{
 mod request;
 mod selector;
 
-pub use request::{DurlRequest, DurlRequestBuilder, DurlResult, RequestError, ResponseTimings};
+pub use request::{
+    DurlRequest, DurlRequestBuilder, DurlResult, ProgressHandler, RequestError, ResponseTimings,
+    VerboseHandler, VerboseMessage,
+};
 
 pub type Result<A, E = Box<dyn std::error::Error>> = std::result::Result<A, E>;
 type DurlResultCallback = dyn FnOnce(DurlResult);

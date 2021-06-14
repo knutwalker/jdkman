@@ -39,11 +39,31 @@ pub fn use_color() -> bool {
 }
 
 #[macro_export]
-macro_rules! eprintln_color {
-    ($color:path, $($arg:tt)*) => ({
+macro_rules! eprint_color {
+    ($color:path, $($arg:tt)*) => {
+        $crate::eprint_color!(@ ::console::Style::new().fg($color), $($arg)*);
+    };
+
+    (@ $style:expr, $($arg:tt)*) => ({
         if $crate::use_color() {
             let text = ::std::fmt::format(format_args!($($arg)*));
-            eprintln!("{}", ::console::style(text).fg($color));
+            eprint!("{}", $style.apply_to(text));
+        } else {
+            eprint!($($arg)*);
+        }
+    })
+}
+
+#[macro_export]
+macro_rules! eprintln_color {
+    ($color:path, $($arg:tt)*) => {
+        $crate::eprintln_color!(@ ::console::Style::new().fg($color), $($arg)*);
+    };
+
+    (@ $style:expr, $($arg:tt)*) => ({
+        if $crate::use_color() {
+            let text = ::std::fmt::format(format_args!($($arg)*));
+            eprintln!("{}", $style.apply_to(text));
         } else {
             eprintln!($($arg)*);
         }
