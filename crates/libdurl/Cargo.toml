@@ -14,9 +14,9 @@ workspace = "../.."
 
 [dependencies]
 curl-sys = "0.4"
-indicatif = { version = "0.16", optional = true, default-features = false}
+indicatif = { version = "0.16", optional = true }
 libc = "0.2"
-memmap = {version = "0.7", optional = true }
+memmap = { version = "0.7", optional = true }
 nohash-hasher = { version = "0.2", optional = true }
 polling = { version = "2", optional = true }
 slab = { version = "0.4", optional = true }
@@ -27,4 +27,5 @@ default-features = false
 features = [ "static-curl", "ssl", "static-ssl", "http2", "zlib-ng-compat" ]
 
 [features]
-client = ["polling", "slab"]
+client = ["nohash-hasher", "polling", "slab"]
+progress_bar = ["indicatif"]

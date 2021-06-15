@@ -14,6 +14,6 @@ workspace = "../.."
 
 [dependencies]
 clicolors-control = "1"
-once_cell = { version = "1", features = [] } # "parking_lot"
 console = { version = "0.14", default-features = false }
 lenient_semver_parser = { version = "0.4", default-features = false, features = ["partial"] }
+once_cell = "1"

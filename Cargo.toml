@@ -15,8 +15,8 @@ edition = "2018"
 resolver = "2"
 
 [dependencies]
-libjdkman = { path = "crates/libjdkman"}
 console = { version = "0.14", default-features = false }
+libjdkman = { path = "crates/libjdkman"}
 pico-args = "0.4"
 
 [profile.release]

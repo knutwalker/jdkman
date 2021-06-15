@@ -1,8 +1,8 @@
 use console::Style;
 use libdurl::{DurlRequestBuilder, DurlResult, VerboseMessage};
-use libjdkman::{eprint_color, eprintln_color, eprintln_red};
-use number_prefix::NumberPrefix;
+use libjdkman::{eprint_color, eprintln_red};
 use std::{error::Error, path::PathBuf, time::Duration};
+use ubyte::ByteUnit;
 
 fn print_response(verbose: bool, response: DurlResult) {
     match response {
@@ -30,75 +30,6 @@ fn print_verbose(msg: VerboseMessage, data: &[u8]) {
     }
 }
 
-fn print_progress(now: u64, total: u64, elapsed: Duration) {
-    if now == total {
-        match NumberPrefix::binary(total as f64) {
-            NumberPrefix::Standalone(total) => {
-                eprintln_color!(
-                    console::Color::Blue,
-                    "[{:?}] done: download {} bytes",
-                    elapsed,
-                    total
-                );
-            }
-            NumberPrefix::Prefixed(prefix, total) => {
-                eprintln_color!(
-                    console::Color::Blue,
-                    "[{:?}] done: download {:.2}{}B",
-                    elapsed,
-                    total,
-                    prefix
-                );
-            }
-        }
-    } else if total > 0 {
-        match NumberPrefix::binary(total as f64) {
-            NumberPrefix::Standalone(total) => {
-                eprintln_color!(
-                    console::Color::Blue,
-                    "[{:?}] download: {:5.2}% {}/{} bytes",
-                    elapsed,
-                    (now as f64) / total * 100.0,
-                    now,
-                    total,
-                );
-            }
-            NumberPrefix::Prefixed(prefix, total) => match NumberPrefix::binary(now as f64) {
-                NumberPrefix::Standalone(now) => {
-                    eprintln_color!(
-                        console::Color::Blue,
-                        "[{:?}] download: {:5.2}% {} bytes/{:.2}{}B",
-                        elapsed,
-                        now / total * 100.0,
-                        now,
-                        total,
-                        prefix,
-                    );
-                }
-                NumberPrefix::Prefixed(now_prefix, now) => {
-                    eprintln_color!(
-                        console::Color::Blue,
-                        "[{:?}] download: {:5.2}% {:.2}{}B/{:.2}{}B",
-                        elapsed,
-                        now / total * 100.0,
-                        now,
-                        now_prefix,
-                        total,
-                        prefix,
-                    );
-                }
-            },
-        }
-    } else {
-        eprintln_color!(
-            console::Color::Blue,
-            "[{:?}] progress: download: {}",
-            elapsed,
-            now
-        );
-    };
-}
-
 fn print_help() {
     eprintln!(concat!(
         env!("CARGO_BIN_NAME"),
@@ -111,17 +42,18 @@ fn print_help() {
 USAGE:
     "#,
         env!("CARGO_BIN_NAME"),
-        r#" [OPTIONS] -o TARGET [URL...]
+        r#" [OPTIONS] -o TARGET URL
 
 OPTIONS:
     -v, --verbose    Prints more information on stderr
     -p, --progress   Prints progress during downloading
     -f, --force      Overwrite the output file if it exists
     -o, --output     The output file
+    -l, --limit      Limit the download speed to LIMIT bytes per second;
     -h, --help       Prints this help information on stderr
 
 ARGS:
-    URL...           URLs to download
+    URL              URL to download
 
 "#
     ));
@@ -137,6 +69,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let verbose_flag = args.contains(["-v", "--verbose"]);
     let progress_flag = args.contains(["-p", "--progress"]);
     let force_flag = args.contains(["-f", "--force"]);
+    let limit: Option<ByteUnit> = args.opt_value_from_str(["-l", "--limit"])?;
 
     let output = args.value_from_os_str(["-o", "--output"], |s| -> Result<_, String> {
         Ok(PathBuf::from(s))
@@ -169,18 +102,23 @@ For more information try --help
 
     let mut request = DurlRequestBuilder::new();
 
+    if let Some(limit) = limit {
+        request.limit_speed(limit.as_u64());
+    }
+
     if progress_flag {
+        let min_download = match limit {
+            Some(limit) => (limit / 20).as_u64(),
+            None => 100 << 10,
+        };
         request
             .progress_bar()
-            .progress_min_download(100_u64 << 10)
+            .progress_min_download(min_download)
             .progress_interval(Duration::from_millis(50));
     }
 
     if verbose_flag {
         request.verbose_fn(print_verbose);
-        if !progress_flag {
-            request.progress_fn(print_progress);
-        }
     }
 
     let request = request

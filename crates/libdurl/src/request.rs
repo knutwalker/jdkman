@@ -10,7 +10,7 @@ use std::{
     io::{self, Write},
     marker::PhantomData,
     mem,
-    num::NonZeroUsize,
+    num::{NonZeroU64, NonZeroUsize},
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -27,6 +27,7 @@ pub struct DurlRequestBuilder<'url, Stage> {
     overwrite_target: bool,
     #[cfg(feature = "memmap")]
     use_mmap: bool,
+    speed_limit: Option<NonZeroU64>,
 
     progress_interval: Duration,
     progress_min_download: u64,
@@ -49,6 +50,12 @@ impl<S> DurlRequestBuilder<'_, S> {
     #[cfg(feature = "memmap")]
     pub fn use_mmap(&mut self, use_mmap: bool) -> &mut Self {
         self.use_mmap = use_mmap;
+        self
+    }
+
+    /// bytes per second, 0 = disable
+    pub fn limit_speed(&mut self, bytes_per_second: u64) -> &mut Self {
+        self.speed_limit = NonZeroU64::new(bytes_per_second);
         self
     }
 
@@ -75,7 +82,7 @@ impl<S> DurlRequestBuilder<'_, S> {
         self
     }
 
-    #[cfg(feature = "indicatif")]
+    #[cfg(feature = "progress_bar")]
     pub fn progress_bar(&mut self) -> &mut Self {
         self.progress_fn = Some(Box::new(progress_bar::DurlProgress::new()));
         self
@@ -98,6 +105,7 @@ impl DurlRequestBuilder<'static, Uninitialized> {
             overwrite_target: false,
             #[cfg(feature = "memmap")]
             use_mmap: true,
+            speed_limit: None,
             progress_interval: Duration::from_secs(1),
             progress_min_download: 1 << 20,
             progress_fn: None,
@@ -113,6 +121,7 @@ impl DurlRequestBuilder<'static, Uninitialized> {
             overwrite_target: self.overwrite_target,
             #[cfg(feature = "memmap")]
             use_mmap: self.use_mmap,
+            speed_limit: self.speed_limit,
             progress_interval: self.progress_interval,
             progress_min_download: self.progress_min_download,
             progress_fn: self.progress_fn.take(),
@@ -130,6 +139,7 @@ impl<'url> DurlRequestBuilder<'url, OutputStage> {
             overwrite_target: self.overwrite_target,
             #[cfg(feature = "memmap")]
             use_mmap: self.use_mmap,
+            speed_limit: self.speed_limit,
             progress_interval: self.progress_interval,
             progress_min_download: self.progress_min_download,
             progress_fn: self.progress_fn.take(),
@@ -147,6 +157,7 @@ impl DurlRequestBuilder<'_, BuildStage> {
             self.url.take().unwrap(),
             self.output.take().unwrap(),
             self.overwrite_target,
+            self.speed_limit,
             #[cfg(feature = "memmap")]
             self.use_mmap,
             self.verbose_fn.take(),
@@ -260,6 +271,7 @@ impl DurlRequest {
         url: &str,
         path: PathBuf,
         overwrite_target: bool,
+        speed_limit: Option<NonZeroU64>,
         #[cfg(feature = "memmap")] use_mmap: bool,
         verbose_fn: Option<Box<dyn VerboseHandler>>,
         progress_fn: Option<(Duration, u64, Box<dyn ProgressHandler>)>,
@@ -268,6 +280,7 @@ impl DurlRequest {
             url,
             path,
             overwrite_target,
+            speed_limit,
             #[cfg(feature = "memmap")]
             use_mmap,
             verbose_fn,
@@ -286,6 +299,7 @@ impl DurlRequestHandler {
         url: &str,
         path: PathBuf,
         overwrite_target: bool,
+        speed_limit: Option<NonZeroU64>,
         #[cfg(feature = "memmap")] use_mmap: bool,
         verbose_fn: Option<Box<dyn VerboseHandler>>,
         progress_fn: Option<(Duration, u64, Box<dyn ProgressHandler>)>,
@@ -333,6 +347,10 @@ impl DurlRequestHandler {
         // enable progress logging
         if progress {
             handle.progress(true)?;
+        }
+
+        if let Some(limit) = speed_limit {
+            handle.max_recv_speed(limit.get())?;
         }
 
         // connection close
@@ -795,10 +813,13 @@ where
     }
 }
 
-#[cfg(feature = "indicatif")]
+#[cfg(feature = "progress_bar")]
 mod progress_bar {
     use indicatif::{ProgressBar, ProgressStyle};
     use std::time::Duration;
+
+    const DEFAULT_TEMPLATE: &str = "({eta_precise}) [{wide_bar}] {percent:>3}% {bytes}/{total_bytes} @{binary_bytes_per_sec} [{elapsed_precise}]";
+    const DEFAULT_PROGRESS: &str = "=> ";
 
     pub(super) struct DurlProgress {
         pb: Option<ProgressBar>,
@@ -813,11 +834,12 @@ mod progress_bar {
     impl super::ProgressHandler for DurlProgress {
         fn progress(&mut self, now: u64, total: u64, _elapsed: Duration) {
             let pb = self.pb.get_or_insert_with(|| {
-                let style = ProgressStyle::default_bar()
-                    .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-                    .progress_chars("#>-");
                 let pb = ProgressBar::new(total);
-                pb.set_style(style);
+                pb.set_style(
+                    ProgressStyle::default_bar()
+                        .template(DEFAULT_TEMPLATE)
+                        .progress_chars(DEFAULT_PROGRESS),
+                );
                 pb
             });
             pb.set_position(now);

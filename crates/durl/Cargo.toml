@@ -14,30 +14,7 @@ workspace = "../.."
 
 [dependencies]
 console = { version = "0.14", default-features = false }
-libdurl = { path = "../libdurl", features = [ "indicatif" ]}
+libdurl = { path = "../libdurl", features = [ "progress_bar" ]}
 libjdkman = { path = "../libjdkman"}
-number_prefix = "0.4"
 pico-args = "0.4"
-
-# bitvec = "0.22"
-# chrono = "0.4"
-# clicolors-control = "1"
-# colour = "0.6"
-# crossbeam-utils = "0.8"
-# curl-sys = "0.4"
-# encoding_rs = "0.8"
-# http = "0.2"
-# libc = "0.2"
-# memchr = "2"
-# memmap = "0.7"
-# nohash-hasher = "0.2.0"
-# once_cell = { version = "1", features = ["parking_lot"] }
-# parse-size = "1"
-# parking_lot = "0.11"
-# polling = "2"
-# slab = "0.4"
-# smallvec = "1"
-# ubyte = "0.10"
-# sluice = "0.5"
-# url = "2"
-# waker-fn = "1"
+ubyte = "0.10"
