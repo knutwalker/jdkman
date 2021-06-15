@@ -1,5 +1,5 @@
 [workspace]
-members = [ "crates/libjdkman" ]
+members = [ "crates/libjdkman", "crates/libdurl", "crates/durl" ]
 
 [package]
 name = "jdkman"

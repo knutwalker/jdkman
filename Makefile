@@ -42,10 +42,10 @@ clean: .cargoinstalled
 
 ### build targets
 
-target/debug/$(APP): .cargoinstalled Cargo.toml Cargo.lock $(shell find src -type f)
+target/debug/$(APP): .cargoinstalled Cargo.toml Cargo.lock $(shell find . \( -path './src*' -or -path './crates*' \) -type f)
 > cargo build --bin $(APP)
 
-target/release/$(APP): .cargoinstalled Cargo.toml Cargo.lock $(shell find src -type f)
+target/release/$(APP): .cargoinstalled Cargo.toml Cargo.lock $(shell find . \( -path './src*' -or -path './crates*' \) -type f)
 > RUSTFLAGS="-C link-arg=-s -C opt-level=3 -C target-cpu=native --emit=asm" cargo build $(CARGOFLAGS) --package $(APP) --release
 
 $(DESTDIR)$(PREFIX)/bin/$(APP): target/release/$(APP)
