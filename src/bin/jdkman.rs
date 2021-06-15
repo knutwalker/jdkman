@@ -1,16 +1,18 @@
-use jdkman::prelude::*;
+use libjdkman::prelude::*;
 
 fn print_help() {
     eprintln!(concat!(
-        env!("CARGO_PKG_NAME"),
+        env!("CARGO_BIN_NAME"),
         " ",
         env!("CARGO_PKG_VERSION")
     ));
     eprintln!(env!("CARGO_PKG_DESCRIPTION"));
-    eprintln!(
+    eprintln!(concat!(
         r#"
 USAGE:
-    jdkman [OPTIONS] [QUERY]
+    "#,
+        env!("CARGO_BIN_NAME"),
+        r#" [OPTIONS] [QUERY]
 
 OPTIONS:
         --current    Only show the current version and quit
@@ -25,7 +27,7 @@ Upon successful execution, jdkman prints shell code to stdout that
 needs to be evaluated in order to provide all the functionality,
 e.g. with `jdk () {{ $(jdkman "$*") }}`.
 "#
-    );
+    ));
 }
 
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error + 'static>> {

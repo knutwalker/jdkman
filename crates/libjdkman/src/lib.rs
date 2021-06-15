@@ -52,10 +52,10 @@ macro_rules! eprintln_color {
 
 #[macro_export]
 macro_rules! eprintln_green {
-    ($($arg:tt)*) => { eprintln_color!(::console::Color::Green, $($arg)*); }
+    ($($arg:tt)*) => { $crate::eprintln_color!(::console::Color::Green, $($arg)*); }
 }
 
 #[macro_export]
 macro_rules! eprintln_red {
-    ($($arg:tt)*) => { eprintln_color!(::console::Color::Red, $($arg)*); }
+    ($($arg:tt)*) => { $crate::eprintln_color!(::console::Color::Red, $($arg)*); }
 }
