@@ -1,0 +1,6 @@
+USAGE:
+    {bin} {command} [OPTIONS]
+
+OPTIONS:
+    -v, --verbose    Prints more information on stderr
+    -h, --help       Prints this help information on stderr

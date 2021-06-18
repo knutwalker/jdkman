@@ -10,30 +10,45 @@ type Result<A> = std::result::Result<A, Box<dyn std::error::Error + 'static>>;
 
 macro_rules! help {
     ($wants_help:ident) => {
-        help!($wants_help, "help" command);
+        help!($wants_help, "COMMAND", "", include_str!("help_main.txt"),);
     };
 
-    ($wants_help:ident, use_command) => {
-        if $wants_help {
-            eprint!(
-                include_str!("jdkman_help_use.txt"),
-                bin = env!("CARGO_BIN_NAME"),
-                version = env!("CARGO_PKG_VERSION"),
-                description = env!("CARGO_PKG_DESCRIPTION"),
-                fzf_bin = ::libjdkman::fzf_command().to_string_lossy(),
-            );
-
-            return Ok(());
-        }
+    ("current", $wants_help:ident) => {
+        help!($wants_help, "current", "Show the current java version for this shell\n\n");
     };
 
-    ($wants_help:ident, $suffix:literal command) => {
+    ("use", $wants_help:ident) => {
+        help!(
+            $wants_help,
+            "[use] [QUERY]",
+            "Select the version to use in this shell session.\nThis command requires `fzf` to be installed!\n\n",
+            include_str!("help_use.txt"),
+            fzf_bin = ::libjdkman::fzf_command().to_string_lossy()
+        );
+    };
+
+    ($wants_help:ident, $command:literal, $summary:literal) => {
+        help!($wants_help, $command, $summary, "",);
+    };
+
+    ($wants_help:ident, $command:literal, $summary:literal, $body:expr, $($args:tt)*) => {
         if $wants_help {
             eprint!(
-                include_str!(concat!("jdkman_help_", $suffix, ".txt")),
+                concat!(
+                    env!("CARGO_BIN_NAME"),
+                    " ",
+                    env!("CARGO_PKG_VERSION"),
+                    "\n",
+                    env!("CARGO_PKG_DESCRIPTION"),
+                    "\n\n",
+                    $summary,
+                    include_str!("help_usage_template.txt"),
+                    "\n",
+                    $body,
+                ),
                 bin = env!("CARGO_BIN_NAME"),
-                version = env!("CARGO_PKG_VERSION"),
-                description = env!("CARGO_PKG_DESCRIPTION"),
+                command = $command,
+                $($args)*
             );
 
             return Ok(());
@@ -159,7 +174,7 @@ pub(crate) fn run() -> Result<()> {
     let subcommand = args.subcommand()?;
     match subcommand.as_deref() {
         Some("current" | "c" | "cu" | "cur" | "curr" | "curre" | "curren") => {
-            help!(wants_help, "current" command);
+            help!("current", wants_help);
             expect_no_more_args(args)?;
             let current = JdkCurrent::run();
             match current {
@@ -168,7 +183,7 @@ pub(crate) fn run() -> Result<()> {
             }
         }
         Some("use" | "us") => {
-            help!(wants_help, use_command);
+            help!("use", wants_help);
             let query = expect_query_arg(args)?;
             run_use(query.as_deref(), verbose_flag)?;
         }

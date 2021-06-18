@@ -1,16 +1,7 @@
-{bin} {version}
-{description}
-
-USAGE:
-    {bin} COMMAND [OPTIONS]
-
-OPTIONS:
-    -v, --verbose    Prints more information on stderr
-    -h, --help       Prints this help information on stderr
-
 COMMANDS:
     {bin} [use] [QUERY]   Select the version to use in this shell session.
     {bin} current         Show the current java version for this shell
 
 For more information on the commands, use
 {bin} [COMMAND] --help
+
