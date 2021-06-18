@@ -26,6 +26,10 @@ impl Candidate {
         self.path
     }
 
+    pub(crate) fn into_name(self) -> String {
+        Self::name_from_path(&self.path).into()
+    }
+
     fn name_from_path(path: &Path) -> &str {
         path.file_name()
             .and_then(|n| n.to_str())

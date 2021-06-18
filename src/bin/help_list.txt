@@ -1,0 +1,9 @@
+OPTIONS:
+    -a, --all        List all available versions
+
+The default behavior for {bin} list is to operate completely offline.
+Infact, the listed versions will be identical to those listed by `{bin} use`.
+
+If `--all` is given, jdkman will hit the sdkman servers and query for all
+available versions. This behavior mirrors the default behavior of `sdk list`.
+

@@ -9,8 +9,8 @@ pub mod prelude {
     pub use crate::{
         candidate::Candidate,
         commands::results::*,
-        commands::{JdkCurrent, JdkDefault, JdkUse},
-        eprintln_color, eprintln_green, eprintln_red,
+        commands::{JdkCurrent, JdkDefault, JdkList, JdkUse},
+        eprintln_color, eprintln_green, eprintln_red, eprintln_yellow,
         sdkman::candidates_dir,
     };
 }
@@ -78,4 +78,9 @@ macro_rules! eprintln_green {
 #[macro_export]
 macro_rules! eprintln_red {
     ($($arg:tt)*) => { $crate::eprintln_color!(::console::Color::Red, $($arg)*); }
+}
+
+#[macro_export]
+macro_rules! eprintln_yellow {
+    ($($arg:tt)*) => { $crate::eprintln_color!(::console::Color::Yellow, $($arg)*); }
 }

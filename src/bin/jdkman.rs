@@ -27,6 +27,15 @@ macro_rules! help {
         );
     };
 
+    ("list", $wants_help:ident) => {
+        help!(
+            $wants_help,
+            "list",
+            "List all locally installed versions or all available versions.\n\n",
+            include_str!("help_list.txt"),
+        );
+    };
+
     ("use", $wants_help:ident) => {
         help!(
             $wants_help,
@@ -214,6 +223,38 @@ pub(crate) fn run() -> Result<()> {
                     eprintln_green!("Default java version set to {}", name);
                 }
             }
+        }
+        Some("list" | "ll" | "ls" | "l") => {
+            help!("list", wants_help);
+            expect_no_more_args(args)?;
+            let result = JdkList::run(verbose_flag)?;
+
+            eprintln!(
+                "--------------------------------------------------------------------------------"
+            );
+
+            if result.is_empty() {
+                eprintln_yellow!("   None installed!");
+            }
+            for result in result {
+                match result {
+                    ListResult::Installed(version) => eprintln!(" * {}", version),
+                    ListResult::Current(version) => eprintln!(" > {}", version),
+                };
+            }
+
+            eprintln!(
+                "--------------------------------------------------------------------------------"
+            );
+            eprintln!(
+                "* - installed                                                                   "
+            );
+            eprintln!(
+                "> - currently in use                                                            "
+            );
+            eprintln!(
+                "--------------------------------------------------------------------------------"
+            );
         }
         Some("use" | "us") => {
             help!("use", wants_help);

@@ -1,7 +1,8 @@
 COMMANDS:
-    {bin} [use] [QUERY]   Select the version to use in this shell session.
-    {bin} current         Show the current java version for this shell
-    {bin} default         Change the default version for all future shells.
+    {bin} [use] [QUERY]     Select the version to use in this shell session.
+    {bin} current           Show the current java version for this shell
+    {bin} default [QUERY]   Change the default version for all future shells.
+    {bin} list              List all locally installed versions or all available versions.
 
 For more information on the commands, use
 {bin} [COMMAND] --help

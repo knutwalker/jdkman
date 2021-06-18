@@ -3,11 +3,13 @@ use std::{ffi::OsStr, io};
 
 pub(crate) mod results {
     pub use super::default_command::DefaultResult;
+    pub use super::list_command::ListResult;
     pub use super::use_command::UseResult;
 }
 
 pub struct JdkCurrent;
 pub struct JdkDefault;
+pub struct JdkList;
 pub struct JdkUse;
 
 impl JdkCurrent {
@@ -22,6 +24,17 @@ impl JdkDefault {
         verbose: bool,
     ) -> io::Result<results::DefaultResult> {
         default_command::run(query.as_ref().map(OsStr::new), candidates_dir(), verbose)
+    }
+}
+
+impl JdkList {
+    pub fn run(verbose: bool) -> io::Result<Vec<results::ListResult>> {
+        let current = JdkCurrent::run();
+        list_command::run(
+            current.as_ref().map(Candidate::name),
+            candidates_dir(),
+            verbose,
+        )
     }
 }
 
@@ -90,7 +103,7 @@ mod current_command {
 }
 
 mod use_command {
-    use super::shared::select_candicates;
+    use super::shared::select_candidates;
     use crate::select::Selection;
     use std::{
         env,
@@ -115,7 +128,7 @@ mod use_command {
         candidates_dir: &Path,
         verbose: bool,
     ) -> io::Result<UseResult> {
-        let selected = select_candicates(query, current, candidates_dir, verbose)?;
+        let selected = select_candidates(query, current, candidates_dir, verbose)?;
 
         let use_result = match selected {
             Selection::Cancelled => UseResult::KeepCurrent,
@@ -163,7 +176,7 @@ mod use_command {
 }
 
 mod default_command {
-    use super::shared::select_candicates;
+    use super::shared::select_candidates;
     use crate::select::Selection;
     use std::{
         ffi::OsStr,
@@ -193,7 +206,7 @@ mod default_command {
         candidates_dir: &Path,
         verbose: bool,
     ) -> io::Result<DefaultResult> {
-        let selected = select_candicates(query, None, candidates_dir.as_ref(), verbose)?;
+        let selected = select_candidates(query, None, candidates_dir.as_ref(), verbose)?;
 
         let default_result = match selected {
             Selection::Cancelled => DefaultResult::KeepCurrent,
@@ -241,6 +254,39 @@ mod default_command {
     }
 }
 
+mod list_command {
+    use super::shared::list_candidates;
+    use std::{
+        io::{self},
+        path::Path,
+    };
+    pub enum ListResult {
+        Installed(String),
+        Current(String),
+    }
+
+    pub(super) fn run(
+        current: Option<&str>,
+        candidates_dir: &Path,
+        _verbose: bool,
+    ) -> io::Result<Vec<ListResult>> {
+        let candidates = list_candidates(candidates_dir)?;
+
+        let candidates = candidates
+            .into_iter()
+            .map(|candidate| {
+                let candidate = candidate.into_name();
+                match current {
+                    Some(current) if current == candidate => ListResult::Current(candidate),
+                    _ => ListResult::Installed(candidate),
+                }
+            })
+            .collect();
+
+        Ok(candidates)
+    }
+}
+
 mod shared {
     use crate::{
         prelude::Candidate,
@@ -253,18 +299,24 @@ mod shared {
         path::Path,
     };
 
-    pub(super) fn select_candicates(
-        query: Option<&OsStr>,
-        current: Option<&str>,
-        candidates_dir: &Path,
-        verbose: bool,
-    ) -> io::Result<Selection<Candidate>> {
+    pub(super) fn list_candidates(candidates_dir: &Path) -> io::Result<Vec<Candidate>> {
         let mut candidates = fs::read_dir(candidates_dir)?
             .filter_map(read_entry)
             .collect::<Vec<_>>();
 
         // sort by version
         candidates.sort();
+
+        Ok(candidates)
+    }
+
+    pub(super) fn select_candidates(
+        query: Option<&OsStr>,
+        current: Option<&str>,
+        candidates_dir: &Path,
+        verbose: bool,
+    ) -> io::Result<Selection<Candidate>> {
+        let candidates = list_candidates(candidates_dir)?;
 
         // pre select whatever current points to
         let pre_select = current
