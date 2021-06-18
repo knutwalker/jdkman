@@ -1,3 +1,31 @@
+use crate::prelude::{candidates_dir, Candidate};
+use std::ffi::OsStr;
+
+pub struct JdkCurrent;
+pub struct JdkUse;
+
+impl JdkCurrent {
+    pub fn run() -> Option<Candidate> {
+        current_command::run(candidates_dir())
+    }
+}
+
+impl JdkUse {
+    pub fn run(
+        query: Option<impl AsRef<OsStr>>,
+        verbose: bool,
+    ) -> std::io::Result<use_command::UseResult> {
+        let current = JdkCurrent::run();
+
+        Ok(use_command::run(
+            query.as_ref().map(OsStr::new),
+            current.as_ref().map(Candidate::name),
+            candidates_dir(),
+            verbose,
+        )?)
+    }
+}
+
 pub mod current_command {
     use crate::candidate::Candidate;
     use std::{env, fs, path::Path};

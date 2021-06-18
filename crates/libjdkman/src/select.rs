@@ -193,7 +193,7 @@ pub(crate) fn fzf_select<T: Display>(options: SelectOptions<T>) -> io::Result<Se
     }
 }
 
-fn fzf_command() -> &'static OsStr {
+pub fn fzf_command() -> &'static OsStr {
     fn find() -> OsString {
         env::var_os("JDKMAN_FZF")
             .or_else(|| search_path("fzf").map(PathBuf::into_os_string))

@@ -9,13 +9,14 @@ pub mod prelude {
     pub use crate::{
         candidate::Candidate,
         commands::{
-            current_command,
-            use_command::{self, UseResult},
+            use_command::UseResult, JdkCurrent, JdkUse,
         },
         eprintln_color, eprintln_green, eprintln_red,
         sdkman::candidates_dir,
     };
 }
+
+pub use select::fzf_command;
 
 pub fn use_color() -> bool {
     fn check_for_colors() -> bool {

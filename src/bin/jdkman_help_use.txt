@@ -1,0 +1,40 @@
+{bin} {version}
+{description}
+
+Select the version to use in this shell session.
+This command requires `fzf` to be installed!
+
+USAGE:
+    {bin} [use] [QUERY] [OPTIONS]
+
+OPTIONS:
+    -v, --verbose    Prints more information on stderr
+    -h, --help       Prints this help information on stderr
+
+ARGS:
+    <QUERY>    Optional query to start a selection.
+
+This is the default command and can be left out.
+
+    {bin} [QUERY]        and
+    {bin} use [QUERY]    are identical
+
+If `use` is ommited, the optional query must not match any other commands,
+lest that command is run. If QUERY is missing, all available candidates will
+be offered for selection via fzf. If QUERY can only lead to a single
+selection, that option will be chosen immediately with any selection. In that
+case, fzf is still required (the --select1 option is passed).
+
+`fzf` (https://github.com/junegunn/fzf) is required for this command. The
+binary will be searched in the $PATH environment variable. If the variable
+$JDKMAN_FZF is set, that value will be used instead.
+
+With the current environment, the following fzf will be used:
+{fzf_bin}
+
+Upon successful execution, {bin} prints shell code to stdout that needs to be
+evaluated in order to provide all the functionality, e.g. with
+`jdk () {{ $({bin} "$*") }}`.
+
+All informational messages are printed to stderr, even if they are not
+necessarily an error. This is done so that stdout can always be `eval`-ed.

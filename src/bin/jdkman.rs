@@ -1,63 +1,88 @@
+use std::{
+    ffi::{OsStr, OsString},
+    fmt::Display,
+};
+
 use libjdkman::prelude::*;
+use pico_args::Arguments;
 
-fn print_help() {
-    eprintln!(concat!(
-        env!("CARGO_BIN_NAME"),
-        " ",
-        env!("CARGO_PKG_VERSION")
-    ));
-    eprintln!(env!("CARGO_PKG_DESCRIPTION"));
-    eprintln!(concat!(
-        r#"
-USAGE:
-    "#,
-        env!("CARGO_BIN_NAME"),
-        r#" [OPTIONS] [QUERY]
+type Result<A> = std::result::Result<A, Box<dyn std::error::Error + 'static>>;
 
-OPTIONS:
-        --current    Only show the current version and quit
-    -v, --verbose    Prints more information on stderr
-    -h, --help       Prints this help information on stderr
+macro_rules! help {
+    ($wants_help:ident) => {
+        help!($wants_help, "help" command);
+    };
 
-ARGS:
-    <QUERY>    Optional query to start a selection
+    ($wants_help:ident, use_command) => {
+        if $wants_help {
+            eprint!(
+                include_str!("jdkman_help_use.txt"),
+                bin = env!("CARGO_BIN_NAME"),
+                version = env!("CARGO_PKG_VERSION"),
+                description = env!("CARGO_PKG_DESCRIPTION"),
+                fzf_bin = ::libjdkman::fzf_command().to_string_lossy(),
+            );
 
+            return Ok(());
+        }
+    };
 
-Upon successful execution, jdkman prints shell code to stdout that
-needs to be evaluated in order to provide all the functionality,
-e.g. with `jdk () {{ $(jdkman "$*") }}`.
-"#
-    ));
+    ($wants_help:ident, $suffix:literal command) => {
+        if $wants_help {
+            eprint!(
+                include_str!(concat!("jdkman_help_", $suffix, ".txt")),
+                bin = env!("CARGO_BIN_NAME"),
+                version = env!("CARGO_PKG_VERSION"),
+                description = env!("CARGO_PKG_DESCRIPTION"),
+            );
+
+            return Ok(());
+        }
+    };
 }
 
-pub(crate) fn run() -> Result<(), Box<dyn std::error::Error + 'static>> {
-    let mut args = pico_args::Arguments::from_env();
-    if args.contains(["-h", "--help"]) {
-        print_help();
+fn expect_query_arg(args: Arguments) -> Result<Option<OsString>> {
+    let mut args = args.finish();
+    let query = match args.split_first_mut() {
+        None => None,
+        Some((query, [])) => Some(std::mem::take(query)),
+        Some((query, unexpected)) => {
+            unexpected_args(unexpected, Some(query))?;
+            None
+        }
+    };
+
+    Ok(query)
+}
+
+fn expect_no_more_args(args: Arguments) -> Result<()> {
+    unexpected_args(args.finish(), None)
+}
+
+fn unexpected_args<A>(args: A, query: Option<&OsStr>) -> Result<()>
+where
+    A: IntoIterator,
+    A::Item: AsRef<OsStr>,
+{
+    let unexpected = args
+        .into_iter()
+        .map(|a| a.as_ref().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    if unexpected.is_empty() {
         return Ok(());
     }
 
-    let current_flag = args.contains("--current");
-    let verbose_flag = args.contains(["-v", "--verbose"]);
-    let args = args.finish();
-    let query = match args.split_first() {
-        None => None,
-        Some((query, [])) => Some(query.as_os_str()),
-        Some((query, unexpected)) => {
-            let unexpected = unexpected
-                .iter()
-                .map(|a| a.to_string_lossy().into_owned())
-                .collect::<Vec<_>>();
+    let argument = if unexpected.len() == 1 {
+        "argument"
+    } else {
+        "arguments"
+    };
 
-            let argument = if unexpected.len() == 1 {
-                "argument"
-            } else {
-                "arguments"
-            };
-
-            let msg = format!(
-                r#"
-Error: found unexpected {argument}: '{unexpected_quotes}'
+    let msg = match query {
+        Some(query) => {
+            format!(
+                r#"Error: found unexpected {argument}: '{unexpected_quotes}'
 In order to use the {argument} in the query, pass it as one argument: "{query} {unexpected_args}"
 
 For more information try --help
@@ -66,27 +91,36 @@ For more information try --help
                 query = query.to_string_lossy(),
                 unexpected_quotes = unexpected.join("', '"),
                 unexpected_args = unexpected.join(" "),
-            );
+            )
+        }
+        None => {
+            format!(
+                r#"Error: found unexpected {argument}: '{unexpected_quotes}'
 
-            return Err(msg.into());
+For more information try --help
+"#,
+                argument = argument,
+                unexpected_quotes = unexpected.join("', '"),
+            )
         }
     };
 
-    let current = current_command::run(candidates_dir());
-    if current_flag {
-        match current {
-            Some(current) => eprintln!("Using java version {}", current.name()),
-            None => eprintln_red!("Not using any version of java"),
-        }
-        return Ok(());
-    }
+    Err(msg.into())
+}
 
-    let use_result = use_command::run(
-        query,
-        current.as_ref().map(Candidate::name),
-        candidates_dir(),
-        verbose_flag,
-    )?;
+#[derive(Debug)]
+struct InvalidPath;
+
+impl Display for InvalidPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad(r"Invalid PATH conversion to UTF-8. This is probably a Windows machine, sooooooo ¯\_(ツ)_/¯")
+    }
+}
+
+impl std::error::Error for InvalidPath {}
+
+fn run_use(query: Option<&OsStr>, verbose: bool) -> Result<()> {
+    let use_result = JdkUse::run(query, verbose)?;
     match use_result {
         UseResult::Use {
             name,
@@ -94,10 +128,16 @@ For more information try --help
             path,
         } => {
             eprintln_green!("Using java version {} in this shell.", name);
-            println!("export JAVA_HOME=\"{}\"", java_home.display());
+            let java_home = std::env::join_paths([java_home])?;
+            let java_home = java_home.to_str().ok_or(InvalidPath)?;
+            let path = path
+                .as_ref()
+                .map(|p| p.to_str().ok_or(InvalidPath))
+                .transpose()?;
+
+            println!("export JAVA_HOME={}", java_home);
             if let Some(path) = path {
-                let path = path.to_str().expect(r"Invalid PATH conversion to UTF-8. This is probably a Windows machine, sooooooo ¯\_(ツ)_/¯");
-                println!("export PATH=\"{}\"", path);
+                println!("export PATH={}", path);
             }
         }
         UseResult::Invalid(Some(name)) => {
@@ -108,6 +148,37 @@ For more information try --help
         }
         UseResult::KeepCurrent => {}
     }
+    Ok(())
+}
+
+pub(crate) fn run() -> Result<()> {
+    let mut args = pico_args::Arguments::from_env();
+    let wants_help = args.contains(["-h", "--help"]);
+    let verbose_flag = args.contains(["-v", "--verbose"]);
+
+    let subcommand = args.subcommand()?;
+    match subcommand.as_deref() {
+        Some("current" | "c" | "cu" | "cur" | "curr" | "curre" | "curren") => {
+            help!(wants_help, "current" command);
+            expect_no_more_args(args)?;
+            let current = JdkCurrent::run();
+            match current {
+                Some(current) => eprintln!("Using java version {}", current.name()),
+                None => eprintln_red!("Not using any version of java"),
+            }
+        }
+        Some("use" | "us") => {
+            help!(wants_help, use_command);
+            let query = expect_query_arg(args)?;
+            run_use(query.as_deref(), verbose_flag)?;
+        }
+        query => {
+            help!(wants_help);
+            let query = query.map(OsStr::new);
+            unexpected_args(args.finish(), query)?;
+            run_use(query, verbose_flag)?;
+        }
+    };
 
     Ok(())
 }
