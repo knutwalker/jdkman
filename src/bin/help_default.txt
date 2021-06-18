@@ -1,0 +1,15 @@
+ARGS:
+    <QUERY>    Optional query to start a selection.
+
+If QUERY is missing, all available candidates will be offered for selection via
+fzf. If QUERY can only lead to a single selection, that option will be chosen
+immediately with any selection. In that case, fzf is still required (the
+--select1 option is passed).
+
+`fzf` (https://github.com/junegunn/fzf) is required for this command. The
+binary will be searched in the $PATH environment variable. If the variable
+$JDKMAN_FZF is set, that value will be used instead.
+
+With the current environment, the following fzf will be used:
+{fzf_bin}
+

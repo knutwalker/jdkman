@@ -8,9 +8,8 @@ mod select;
 pub mod prelude {
     pub use crate::{
         candidate::Candidate,
-        commands::{
-            use_command::UseResult, JdkCurrent, JdkUse,
-        },
+        commands::results::*,
+        commands::{JdkCurrent, JdkDefault, JdkUse},
         eprintln_color, eprintln_green, eprintln_red,
         sdkman::candidates_dir,
     };

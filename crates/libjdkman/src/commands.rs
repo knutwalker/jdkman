@@ -1,7 +1,13 @@
 use crate::prelude::{candidates_dir, Candidate};
-use std::ffi::OsStr;
+use std::{ffi::OsStr, io};
+
+pub(crate) mod results {
+    pub use super::default_command::DefaultResult;
+    pub use super::use_command::UseResult;
+}
 
 pub struct JdkCurrent;
+pub struct JdkDefault;
 pub struct JdkUse;
 
 impl JdkCurrent {
@@ -10,29 +16,32 @@ impl JdkCurrent {
     }
 }
 
-impl JdkUse {
+impl JdkDefault {
     pub fn run(
         query: Option<impl AsRef<OsStr>>,
         verbose: bool,
-    ) -> std::io::Result<use_command::UseResult> {
-        let current = JdkCurrent::run();
+    ) -> io::Result<results::DefaultResult> {
+        default_command::run(query.as_ref().map(OsStr::new), candidates_dir(), verbose)
+    }
+}
 
-        Ok(use_command::run(
+impl JdkUse {
+    pub fn run(query: Option<impl AsRef<OsStr>>, verbose: bool) -> io::Result<results::UseResult> {
+        let current = JdkCurrent::run();
+        use_command::run(
             query.as_ref().map(OsStr::new),
             current.as_ref().map(Candidate::name),
             candidates_dir(),
             verbose,
-        )?)
+        )
     }
 }
 
-pub mod current_command {
+mod current_command {
     use crate::candidate::Candidate;
     use std::{env, fs, path::Path};
 
-    pub fn run(candidates_dir: impl AsRef<Path>) -> Option<Candidate> {
-        let candidates_dir = candidates_dir.as_ref();
-
+    pub(super) fn run(candidates_dir: &Path) -> Option<Candidate> {
         // try to find the currently enabled candidate in the PATH
         // If path is empty None is returned
         // If the candidate is not found, None is returned
@@ -80,15 +89,12 @@ pub mod current_command {
     }
 }
 
-pub mod use_command {
-    use crate::{
-        candidate::Candidate,
-        select::{SelectOptions, Selection},
-    };
+mod use_command {
+    use super::shared::select_candicates;
+    use crate::select::Selection;
     use std::{
         env,
         ffi::{OsStr, OsString},
-        fs::{self, DirEntry},
         io,
         path::{Path, PathBuf},
     };
@@ -103,39 +109,13 @@ pub mod use_command {
         },
     }
 
-    pub fn run(
+    pub(super) fn run(
         query: Option<&OsStr>,
         current: Option<&str>,
-        candidates_dir: impl AsRef<Path>,
+        candidates_dir: &Path,
         verbose: bool,
     ) -> io::Result<UseResult> {
-        let candidates_dir = candidates_dir.as_ref();
-        let mut candidates = fs::read_dir(candidates_dir)?
-            .filter_map(read_entry)
-            .collect::<Vec<_>>();
-
-        // sort by version
-        candidates.sort();
-
-        // pre select whatever current points to
-        let pre_select = current
-            .and_then(|current| candidates.iter().position(|c| c.name() == current))
-            .map(|p| p as u32);
-
-        // Note that `java -version` prints to stderr and
-        // backends might only show stderr when the command fails.
-        // So we use `--version` instead, which is also more idiomatic.
-        let preview_command = format!(
-            "{0}/{{2}}/bin/java --version; {0}/{{2}}/bin/java -Xinternalversion",
-            candidates_dir.display()
-        );
-
-        let selected = SelectOptions::new(candidates)
-            .pre_select(pre_select)
-            .query(query)
-            .preview_command(preview_command.as_str())
-            .verbose(verbose)
-            .select()?;
+        let selected = select_candicates(query, current, candidates_dir, verbose)?;
 
         let use_result = match selected {
             Selection::Cancelled => UseResult::KeepCurrent,
@@ -179,6 +159,134 @@ pub mod use_command {
         };
 
         Ok(use_result)
+    }
+}
+
+mod default_command {
+    use super::shared::select_candicates;
+    use crate::select::Selection;
+    use std::{
+        ffi::OsStr,
+        fs,
+        io::{self, ErrorKind},
+        path::Path,
+    };
+
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+    #[cfg(windows)]
+    use std::os::windows::fs::symlink_dir as symlink;
+
+    pub enum DefaultResult {
+        KeepCurrent,
+        CandidateNotFound {
+            query: Option<String>,
+        },
+        Selected {
+            name: String,
+            before: Option<String>,
+        },
+    }
+
+    pub(super) fn run(
+        query: Option<&OsStr>,
+        candidates_dir: &Path,
+        verbose: bool,
+    ) -> io::Result<DefaultResult> {
+        let selected = select_candicates(query, None, candidates_dir.as_ref(), verbose)?;
+
+        let default_result = match selected {
+            Selection::Cancelled => DefaultResult::KeepCurrent,
+            Selection::NoMatch => {
+                let query = query.and_then(|q| q.to_str()).map(String::from);
+                DefaultResult::CandidateNotFound { query }
+            }
+            Selection::Selected(selection) => {
+                let name = selection.to_string();
+                let candidate_path = selection.into_path();
+                let current_path = candidates_dir.join("current");
+
+                // We need to unlink any existing link and bail if current seems to not be a link at all
+                let previous = match fs::symlink_metadata(&current_path) {
+                    Ok(meta) => {
+                        if meta.is_file() || meta.is_dir() {
+                            return Err(io::Error::new(ErrorKind::AlreadyExists, format!("The 'current' link [{}] cannot be changed since it is not a link.", current_path.display())));
+                        }
+                        let previous = fs::read_link(&current_path)?;
+                        let previous = previous.strip_prefix(candidates_dir).unwrap_or(&previous);
+                        let previous = previous.to_str().map(String::from);
+
+                        fs::remove_file(&current_path)?;
+
+                        previous
+                    }
+                    Err(err) if err.kind() == ErrorKind::NotFound => None,
+                    Err(e) => return Err(e),
+                };
+
+                // emulate sdkman by linking the relative path
+                let candidate_path = candidate_path
+                    .strip_prefix(candidates_dir)
+                    .unwrap_or(&candidate_path);
+
+                symlink(candidate_path, &current_path)?;
+                DefaultResult::Selected {
+                    name,
+                    before: previous,
+                }
+            }
+        };
+
+        Ok(default_result)
+    }
+}
+
+mod shared {
+    use crate::{
+        prelude::Candidate,
+        select::{SelectOptions, Selection},
+    };
+    use std::{
+        ffi::OsStr,
+        fs::{self, DirEntry},
+        io,
+        path::Path,
+    };
+
+    pub(super) fn select_candicates(
+        query: Option<&OsStr>,
+        current: Option<&str>,
+        candidates_dir: &Path,
+        verbose: bool,
+    ) -> io::Result<Selection<Candidate>> {
+        let mut candidates = fs::read_dir(candidates_dir)?
+            .filter_map(read_entry)
+            .collect::<Vec<_>>();
+
+        // sort by version
+        candidates.sort();
+
+        // pre select whatever current points to
+        let pre_select = current
+            .and_then(|current| candidates.iter().position(|c| c.name() == current))
+            .map(|p| p as u32);
+
+        // Note that `java -version` prints to stderr and
+        // backends might only show stderr when the command fails.
+        // So we use `--version` instead, which is also more idiomatic.
+        let preview_command = format!(
+            "{0}/{{2}}/bin/java --version; {0}/{{2}}/bin/java -Xinternalversion",
+            candidates_dir.display()
+        );
+
+        let selected = SelectOptions::new(candidates)
+            .pre_select(pre_select)
+            .query(query)
+            .preview_command(preview_command.as_str())
+            .verbose(verbose)
+            .select()?;
+
+        Ok(selected)
     }
 
     fn read_entry(entry: io::Result<DirEntry>) -> Option<Candidate> {

@@ -17,6 +17,16 @@ macro_rules! help {
         help!($wants_help, "current", "Show the current java version for this shell\n\n");
     };
 
+    ("default", $wants_help:ident) => {
+        help!(
+            $wants_help,
+            "default [QUERY]",
+            "Change the default version for all future shells.\nThis command requires `fzf` to be installed!\n\n",
+            include_str!("help_default.txt"),
+            fzf_bin = ::libjdkman::fzf_command().to_string_lossy()
+        );
+    };
+
     ("use", $wants_help:ident) => {
         help!(
             $wants_help,
@@ -170,16 +180,39 @@ pub(crate) fn run() -> Result<()> {
     let mut args = pico_args::Arguments::from_env();
     let wants_help = args.contains(["-h", "--help"]);
     let verbose_flag = args.contains(["-v", "--verbose"]);
-
     let subcommand = args.subcommand()?;
+
     match subcommand.as_deref() {
-        Some("current" | "c" | "cu" | "cur" | "curr" | "curre" | "curren") => {
+        Some("current" | "c") => {
             help!("current", wants_help);
             expect_no_more_args(args)?;
             let current = JdkCurrent::run();
             match current {
                 Some(current) => eprintln!("Using java version {}", current.name()),
                 None => eprintln_red!("Not using any version of java"),
+            }
+        }
+        Some("default" | "d") => {
+            help!("default", wants_help);
+            let query = expect_query_arg(args)?;
+            let result = JdkDefault::run(query, verbose_flag)?;
+            match result {
+                DefaultResult::KeepCurrent => {}
+                DefaultResult::CandidateNotFound { query: Some(name) } => {
+                    eprintln_red!("Stop! Candidate version {} is not installed.", name);
+                }
+                DefaultResult::CandidateNotFound { .. } => {
+                    eprintln_red!("Stop! Candidate version is not installed.");
+                }
+                DefaultResult::Selected {
+                    name,
+                    before: Some(before),
+                } => {
+                    eprintln_green!("Default java version set from {} to {}", before, name);
+                }
+                DefaultResult::Selected { name, .. } => {
+                    eprintln_green!("Default java version set to {}", name);
+                }
             }
         }
         Some("use" | "us") => {
