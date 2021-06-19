@@ -1,5 +1,6 @@
 use lenient_semver_parser::VersionBuilder;
 use std::{
+    borrow::Borrow,
     fmt::Display,
     path::{Path, PathBuf},
 };
@@ -58,6 +59,12 @@ impl Ord for Candidate {
 impl PartialOrd for Candidate {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.version.partial_cmp(&other.version)
+    }
+}
+
+impl Borrow<str> for Candidate {
+    fn borrow(&self) -> &str {
+        self.name()
     }
 }
 

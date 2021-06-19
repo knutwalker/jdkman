@@ -11,7 +11,7 @@ pub mod prelude {
         commands::results::*,
         commands::{JdkCurrent, JdkDefault, JdkList, JdkUse},
         eprintln_color, eprintln_green, eprintln_red, eprintln_yellow,
-        sdkman::candidates_dir,
+        sdkman::{candidates_api, candidates_dir, platform},
     };
 }
 

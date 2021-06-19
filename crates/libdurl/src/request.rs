@@ -64,6 +64,16 @@ impl<S> DurlRequestBuilder<'_, S> {
         self
     }
 
+    pub fn verbose_fn_if(
+        &mut self,
+        verbose_flag: bool,
+        verbose: impl FnMut(VerboseMessage, &[u8]) + 'static,
+    ) -> &mut Self {
+        self.verbose_fn = verbose_flag
+            .then(move || -> Box<dyn VerboseHandler> { Box::new(VerboseHandlerFromFn(verbose)) });
+        self
+    }
+
     pub fn progress(&mut self, progress: impl ProgressHandler + 'static) -> &mut Self {
         self.progress_fn = Some(Box::new(progress));
         self
@@ -177,14 +187,14 @@ impl<'url> DurlRequestBuilder<'url, OutputStage> {
 
     pub fn write_to_writer(
         &mut self,
-        writer: impl Write + 'static,
+        writer: impl Write + Send + Sync + 'static,
     ) -> DurlRequestBuilder<'url, BuildStage> {
         self.target(Target::ToWriter(Box::new(writer)))
     }
 
     pub fn write_to_boxed_writer(
         &mut self,
-        writer: impl Into<Box<dyn Write>>,
+        writer: impl Into<Box<dyn Write + Send + Sync>>,
     ) -> DurlRequestBuilder<'url, BuildStage> {
         self.target(Target::ToWriter(writer.into()))
     }
@@ -204,8 +214,8 @@ impl<'url> DurlRequestBuilder<'url, OutputStage> {
 }
 
 impl DurlRequestBuilder<'_, BuildStage> {
-    pub fn build(&mut self) -> Result<DurlRequest> {
-        Ok(DurlRequest::new(
+    pub fn build(&mut self) -> io::Result<DurlRequest> {
+        DurlRequest::new(
             self.url.take().unwrap(),
             self.target.take().unwrap(),
             self.speed_limit,
@@ -213,7 +223,7 @@ impl DurlRequestBuilder<'_, BuildStage> {
             self.progress_fn
                 .take()
                 .map(|f| (self.progress_interval, self.progress_min_download, f)),
-        )?)
+        )
     }
 }
 
@@ -235,7 +245,7 @@ pub enum Target {
     },
     ToBytes(Vec<u8>),
     ToString(String),
-    ToWriter(Box<dyn Write>),
+    ToWriter(Box<dyn Write + Send + Sync>),
 }
 
 impl Target {
@@ -273,7 +283,7 @@ impl Target {
         }
     }
 
-    pub fn writer(writer: impl Write + 'static) -> Self {
+    pub fn writer(writer: impl Write + Send + Sync + 'static) -> Self {
         Self::ToWriter(Box::new(writer))
     }
 
@@ -285,6 +295,26 @@ impl Target {
         {
             *overwrite_if_exists = overwrite_if_exists_value;
         }
+    }
+
+    pub fn try_string(self) -> Result<String, Self> {
+        match self {
+            Target::ToString(s) => Ok(s),
+            Target::ToBytes(bytes) => match String::from_utf8(bytes) {
+                Ok(s) => Ok(s),
+                Err(invalid) => Err(Target::ToBytes(invalid.into_bytes())),
+            },
+            otherwise => Err(otherwise),
+        }
+    }
+
+    pub fn expect_string(self) -> String {
+        self.try_string().unwrap_or_else(|otherwise| {
+            panic!(
+                "Unexpected target, required ToString but got {:?}",
+                otherwise
+            )
+        })
     }
 }
 
@@ -382,7 +412,7 @@ enum InnerTarget {
     },
     ToBytes(Vec<u8>),
     ToString(Vec<u8>),
-    ToWriter(Box<dyn Write>),
+    ToWriter(Box<dyn Write + Send + Sync>),
     #[cfg(feature = "memmap")]
     ToMMap {
         path: PathBuf,

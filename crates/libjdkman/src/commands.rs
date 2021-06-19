@@ -1,9 +1,8 @@
-use crate::prelude::{candidates_dir, Candidate};
+use crate::prelude::{candidates_api, candidates_dir, platform, Candidate};
 use std::{ffi::OsStr, io};
 
 pub(crate) mod results {
     pub use super::default_command::DefaultResult;
-    pub use super::list_command::ListResult;
     pub use super::use_command::UseResult;
 }
 
@@ -28,13 +27,19 @@ impl JdkDefault {
 }
 
 impl JdkList {
-    pub fn run(verbose: bool) -> io::Result<Vec<results::ListResult>> {
+    pub fn run(verbose: bool, all: bool) -> io::Result<String> {
         let current = JdkCurrent::run();
-        list_command::run(
-            current.as_ref().map(Candidate::name),
-            candidates_dir(),
-            verbose,
-        )
+        if all {
+            list_command::run_online(
+                current.as_ref().map(Candidate::name),
+                candidates_dir(),
+                candidates_api(),
+                platform(),
+                verbose,
+            )
+        } else {
+            list_command::run(current.as_ref().map(Candidate::name), candidates_dir())
+        }
     }
 }
 
@@ -206,7 +211,7 @@ mod default_command {
         candidates_dir: &Path,
         verbose: bool,
     ) -> io::Result<DefaultResult> {
-        let selected = select_candidates(query, None, candidates_dir.as_ref(), verbose)?;
+        let selected = select_candidates(query, None, candidates_dir, verbose)?;
 
         let default_result = match selected {
             Selection::Cancelled => DefaultResult::KeepCurrent,
@@ -256,34 +261,97 @@ mod default_command {
 
 mod list_command {
     use super::shared::list_candidates;
-    use std::{
-        io::{self},
-        path::Path,
-    };
-    pub enum ListResult {
-        Installed(String),
-        Current(String),
-    }
+    use crate::{eprint_color, eprintln_color};
+    use console::Style;
+    use libdurl::{DurlRequestBuilder, VerboseMessage};
+    use std::{fmt::Write, io, path::Path};
 
-    pub(super) fn run(
-        current: Option<&str>,
-        candidates_dir: &Path,
-        _verbose: bool,
-    ) -> io::Result<Vec<ListResult>> {
+    pub(super) fn run(current: Option<&str>, candidates_dir: &Path) -> io::Result<String> {
         let candidates = list_candidates(candidates_dir)?;
 
-        let candidates = candidates
-            .into_iter()
-            .map(|candidate| {
-                let candidate = candidate.into_name();
-                match current {
-                    Some(current) if current == candidate => ListResult::Current(candidate),
-                    _ => ListResult::Installed(candidate),
-                }
-            })
-            .collect();
+        let mut output = String::with_capacity(1024);
+        output.push_str(
+            "--------------------------------------------------------------------------------\n",
+        );
+        if candidates.is_empty() {
+            if crate::use_color() {
+                let _ = writeln!(
+                    &mut output,
+                    "   {}",
+                    console::style("None installed!").yellow()
+                );
+            }
+        }
 
-        Ok(candidates)
+        for candidate in candidates {
+            let candidate = candidate.into_name();
+
+            if matches!(current, Some(c) if c == candidate) {
+                let _ = writeln!(&mut output, " > {}", candidate);
+            } else {
+                let _ = writeln!(&mut output, " * {}", candidate);
+            }
+        }
+
+        output.push_str(
+            "--------------------------------------------------------------------------------\n",
+        );
+        output.push_str(
+            "* - installed                                                                   \n",
+        );
+        output.push_str(
+            "> - currently in use                                                            \n",
+        );
+        output.push_str(
+            "--------------------------------------------------------------------------------\n",
+        );
+
+        Ok(output)
+    }
+
+    pub(super) fn run_online(
+        current: Option<&str>,
+        candidates_dir: &Path,
+        candidates_api: &str,
+        platform: &str,
+        verbose: bool,
+    ) -> io::Result<String> {
+        let installed = list_candidates(candidates_dir)?;
+
+        let url = format!(
+            "{api}/candidates/java/{platform}/versions/list?current={current}&installed=${installed}",
+            api = candidates_api,
+            platform = platform,
+            current = current.unwrap_or_default(),
+            installed = installed.join(",")
+        );
+
+        let candidates = DurlRequestBuilder::new()
+            .verbose_fn_if(verbose, print_verbose)
+            .url(&url)
+            .return_as_string()
+            .build()?
+            .perform()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        if verbose {
+            eprintln_color!(@Style::new().for_stderr().dim(), "{:#?}", candidates.timings);
+        }
+
+        Ok(candidates.target.expect_string())
+    }
+
+    fn print_verbose(msg: VerboseMessage, data: &[u8]) {
+        let style = match msg {
+            VerboseMessage::Text => Style::new().for_stderr().dim(),
+            VerboseMessage::OutgoingHeader => Style::new().for_stderr().dim().magenta(),
+            VerboseMessage::FirstIncomingHeader => Style::new().for_stderr().green(),
+            VerboseMessage::IncomingHeader => Style::new().for_stderr().cyan(),
+        };
+        match std::str::from_utf8(data) {
+            Ok(s) => eprint_color!(@style, "{}", s),
+            Err(_) => eprint_color!(@style.red(), "({} bytes of data)", data.len()),
+        }
     }
 }
 

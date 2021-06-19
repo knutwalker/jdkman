@@ -188,9 +188,12 @@ dependencies = [
 name = "libjdkman"
 version = "0.1.0"
 dependencies = [
+ "cfg-if",
  "clicolors-control",
  "console",
  "lenient_semver_parser",
+ "libc",
+ "libdurl",
  "once_cell",
 ]
 

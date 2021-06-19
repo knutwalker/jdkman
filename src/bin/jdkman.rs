@@ -189,6 +189,7 @@ pub(crate) fn run() -> Result<()> {
     let mut args = pico_args::Arguments::from_env();
     let wants_help = args.contains(["-h", "--help"]);
     let verbose_flag = args.contains(["-v", "--verbose"]);
+    let all_flag = args.contains(["-a", "--all"]);
     let subcommand = args.subcommand()?;
 
     match subcommand.as_deref() {
@@ -227,34 +228,8 @@ pub(crate) fn run() -> Result<()> {
         Some("list" | "ll" | "ls" | "l") => {
             help!("list", wants_help);
             expect_no_more_args(args)?;
-            let result = JdkList::run(verbose_flag)?;
-
-            eprintln!(
-                "--------------------------------------------------------------------------------"
-            );
-
-            if result.is_empty() {
-                eprintln_yellow!("   None installed!");
-            }
-            for result in result {
-                match result {
-                    ListResult::Installed(version) => eprintln!(" * {}", version),
-                    ListResult::Current(version) => eprintln!(" > {}", version),
-                };
-            }
-
-            eprintln!(
-                "--------------------------------------------------------------------------------"
-            );
-            eprintln!(
-                "* - installed                                                                   "
-            );
-            eprintln!(
-                "> - currently in use                                                            "
-            );
-            eprintln!(
-                "--------------------------------------------------------------------------------"
-            );
+            let result = JdkList::run(verbose_flag, all_flag)?;
+            eprint!("{}", result);
         }
         Some("use" | "us") => {
             help!("use", wants_help);
