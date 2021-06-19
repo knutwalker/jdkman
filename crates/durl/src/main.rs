@@ -1,7 +1,7 @@
 use console::Style;
-use libdurl::{DurlRequestBuilder, DurlResult, VerboseMessage};
+use libdurl::{DurlRequestBuilder, DurlResult, Target, VerboseMessage};
 use libjdkman::{eprint_color, eprintln_red};
-use std::{error::Error, path::PathBuf, time::Duration};
+use std::{error::Error, time::Duration};
 use ubyte::ByteUnit;
 
 fn print_response(verbose: bool, response: DurlResult) {
@@ -68,12 +68,18 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     let verbose_flag = args.contains(["-v", "--verbose"]);
     let progress_flag = args.contains(["-p", "--progress"]);
-    let force_flag = args.contains(["-f", "--force"]);
     let limit: Option<ByteUnit> = args.opt_value_from_str(["-l", "--limit"])?;
 
-    let output = args.value_from_os_str(["-o", "--output"], |s| -> Result<_, String> {
-        Ok(PathBuf::from(s))
+    let mut target = args.value_from_os_str(["-o", "--output"], |s| -> Result<_, String> {
+        if s == "-" {
+            Ok(Target::stdout())
+        } else {
+            Ok(Target::file(s, false))
+        }
     })?;
+
+    let force_flag = args.contains(["-f", "--force"]);
+    target.set_overwrite_if_exists(force_flag);
 
     let url: String = args.free_from_str()?;
 
@@ -121,11 +127,7 @@ For more information try --help
         request.verbose_fn(print_verbose);
     }
 
-    let request = request
-        .overwrite_target(force_flag)
-        .url(&url)
-        .output(output)
-        .build()?;
+    let request = request.url(&url).target(target).build()?;
 
     // print version line
     if verbose_flag {

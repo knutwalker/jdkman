@@ -15,18 +15,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub type DurlResult = Result<ResponseTimings, RequestError>;
+pub type DurlResult = Result<DurlResponse, RequestError>;
 
 pub struct DurlRequest(pub(crate) Easy2<DurlRequestHandler>);
+
+#[derive(Debug)]
+pub struct DurlResponse {
+    pub target: Target,
+    pub timings: ResponseTimings,
+}
 
 pub enum Uninitialized {}
 pub enum OutputStage {}
 pub enum BuildStage {}
 
 pub struct DurlRequestBuilder<'url, Stage> {
-    overwrite_target: bool,
-    #[cfg(feature = "memmap")]
-    use_mmap: bool,
     speed_limit: Option<NonZeroU64>,
 
     progress_interval: Duration,
@@ -36,23 +39,12 @@ pub struct DurlRequestBuilder<'url, Stage> {
     verbose_fn: Option<Box<dyn VerboseHandler>>,
 
     url: Option<&'url str>,
-    output: Option<PathBuf>,
+    target: Option<Target>,
 
     _stage: PhantomData<Stage>,
 }
 
 impl<S> DurlRequestBuilder<'_, S> {
-    pub fn overwrite_target(&mut self, overwrite_target: bool) -> &mut Self {
-        self.overwrite_target = overwrite_target;
-        self
-    }
-
-    #[cfg(feature = "memmap")]
-    pub fn use_mmap(&mut self, use_mmap: bool) -> &mut Self {
-        self.use_mmap = use_mmap;
-        self
-    }
-
     /// bytes per second, 0 = disable
     pub fn limit_speed(&mut self, bytes_per_second: u64) -> &mut Self {
         self.speed_limit = NonZeroU64::new(bytes_per_second);
@@ -102,50 +94,110 @@ impl<S> DurlRequestBuilder<'_, S> {
 impl DurlRequestBuilder<'static, Uninitialized> {
     pub fn new() -> Self {
         DurlRequestBuilder {
-            overwrite_target: false,
-            #[cfg(feature = "memmap")]
-            use_mmap: true,
             speed_limit: None,
             progress_interval: Duration::from_secs(1),
             progress_min_download: 1 << 20,
             progress_fn: None,
             verbose_fn: None,
             url: None,
-            output: None,
+            target: None,
             _stage: PhantomData,
         }
     }
 
     pub fn url<'url>(&mut self, url: &'url str) -> DurlRequestBuilder<'url, OutputStage> {
         DurlRequestBuilder {
-            overwrite_target: self.overwrite_target,
-            #[cfg(feature = "memmap")]
-            use_mmap: self.use_mmap,
             speed_limit: self.speed_limit,
             progress_interval: self.progress_interval,
             progress_min_download: self.progress_min_download,
             progress_fn: self.progress_fn.take(),
             verbose_fn: self.verbose_fn.take(),
             url: Some(url),
-            output: None,
+            target: None,
             _stage: PhantomData,
         }
     }
 }
 
 impl<'url> DurlRequestBuilder<'url, OutputStage> {
-    pub fn output(&mut self, output: impl Into<PathBuf>) -> DurlRequestBuilder<'url, BuildStage> {
+    pub fn write_to_file(
+        &mut self,
+        overwrite_if_exists: bool,
+        output: impl Into<PathBuf>,
+    ) -> DurlRequestBuilder<'url, BuildStage> {
+        self.target(Target::file(output, overwrite_if_exists))
+    }
+
+    #[cfg(feature = "memmap")]
+    pub fn write_to_memory_mapped_file(
+        &mut self,
+        overwrite_if_exists: bool,
+        output: impl Into<PathBuf>,
+    ) -> DurlRequestBuilder<'url, BuildStage> {
+        self.target(Target::memory_mapped_file(output, overwrite_if_exists))
+    }
+
+    pub fn write_to_stdout(&mut self) -> DurlRequestBuilder<'url, BuildStage> {
+        self.target(Target::stdout())
+    }
+
+    pub fn write_to_sterr(&mut self) -> DurlRequestBuilder<'url, BuildStage> {
+        self.target(Target::stderr())
+    }
+
+    pub fn return_as_bytes(&mut self) -> DurlRequestBuilder<'url, BuildStage> {
+        self.append_to_bytes(Vec::new())
+    }
+
+    pub fn return_as_bytes_with_capacity(
+        &mut self,
+        capacity: usize,
+    ) -> DurlRequestBuilder<'url, BuildStage> {
+        self.append_to_bytes(Vec::with_capacity(capacity))
+    }
+
+    pub fn append_to_bytes(&mut self, bytes: Vec<u8>) -> DurlRequestBuilder<'url, BuildStage> {
+        self.target(Target::ToBytes(bytes))
+    }
+
+    pub fn return_as_string(&mut self) -> DurlRequestBuilder<'url, BuildStage> {
+        self.append_to_string(String::new())
+    }
+
+    pub fn return_as_string_with_capacity(
+        &mut self,
+        capacity: usize,
+    ) -> DurlRequestBuilder<'url, BuildStage> {
+        self.append_to_string(String::with_capacity(capacity))
+    }
+
+    pub fn append_to_string(&mut self, string: String) -> DurlRequestBuilder<'url, BuildStage> {
+        self.target(Target::ToString(string))
+    }
+
+    pub fn write_to_writer(
+        &mut self,
+        writer: impl Write + 'static,
+    ) -> DurlRequestBuilder<'url, BuildStage> {
+        self.target(Target::ToWriter(Box::new(writer)))
+    }
+
+    pub fn write_to_boxed_writer(
+        &mut self,
+        writer: impl Into<Box<dyn Write>>,
+    ) -> DurlRequestBuilder<'url, BuildStage> {
+        self.target(Target::ToWriter(writer.into()))
+    }
+
+    pub fn target(&mut self, target: Target) -> DurlRequestBuilder<'url, BuildStage> {
         DurlRequestBuilder {
-            overwrite_target: self.overwrite_target,
-            #[cfg(feature = "memmap")]
-            use_mmap: self.use_mmap,
             speed_limit: self.speed_limit,
             progress_interval: self.progress_interval,
             progress_min_download: self.progress_min_download,
             progress_fn: self.progress_fn.take(),
             verbose_fn: self.verbose_fn.take(),
             url: self.url.take(),
-            output: Some(output.into()),
+            target: Some(target),
             _stage: PhantomData,
         }
     }
@@ -155,11 +207,8 @@ impl DurlRequestBuilder<'_, BuildStage> {
     pub fn build(&mut self) -> Result<DurlRequest> {
         Ok(DurlRequest::new(
             self.url.take().unwrap(),
-            self.output.take().unwrap(),
-            self.overwrite_target,
+            self.target.take().unwrap(),
             self.speed_limit,
-            #[cfg(feature = "memmap")]
-            self.use_mmap,
             self.verbose_fn.take(),
             self.progress_fn
                 .take()
@@ -171,6 +220,71 @@ impl DurlRequestBuilder<'_, BuildStage> {
 impl Default for DurlRequestBuilder<'static, Uninitialized> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub enum Target {
+    Drop,
+    StdOut,
+    StdErr,
+    ToFile {
+        path: PathBuf,
+        overwrite_if_exists: bool,
+        #[cfg(feature = "memmap")]
+        use_mmap: bool,
+    },
+    ToBytes(Vec<u8>),
+    ToString(String),
+    ToWriter(Box<dyn Write>),
+}
+
+impl Target {
+    pub const fn stdout() -> Self {
+        Self::StdOut
+    }
+
+    pub const fn stderr() -> Self {
+        Self::StdErr
+    }
+
+    pub const fn bytes() -> Self {
+        Self::ToBytes(Vec::new())
+    }
+
+    pub const fn string() -> Self {
+        Self::ToString(String::new())
+    }
+
+    pub fn file(path: impl Into<PathBuf>, overwrite_if_exists: bool) -> Self {
+        Self::ToFile {
+            path: path.into(),
+            overwrite_if_exists,
+            #[cfg(feature = "memmap")]
+            use_mmap: false,
+        }
+    }
+
+    #[cfg(feature = "memmap")]
+    pub fn memory_mapped_file(path: impl Into<PathBuf>, overwrite_if_exists: bool) -> Self {
+        Self::ToFile {
+            path: path.into(),
+            overwrite_if_exists,
+            use_mmap: true,
+        }
+    }
+
+    pub fn writer(writer: impl Write + 'static) -> Self {
+        Self::ToWriter(Box::new(writer))
+    }
+
+    pub fn set_overwrite_if_exists(&mut self, overwrite_if_exists_value: bool) {
+        if let Target::ToFile {
+            overwrite_if_exists,
+            ..
+        } = self
+        {
+            *overwrite_if_exists = overwrite_if_exists_value;
+        }
     }
 }
 
@@ -200,17 +314,15 @@ pub(crate) struct DurlRequestHandler {
     first_header_in: bool,
     read_content_length: bool,
     is_redirect: bool,
-    #[cfg(feature = "memmap")]
-    use_mmap: bool,
     content_length: Option<NonZeroUsize>,
-    error: Option<RequestError>,
+    error: Option<InnerRequestError>,
     verbose: Option<Box<dyn VerboseHandler>>,
     progress: Option<ResponseProgress>,
-    output: ResponseOutput,
+    target: InnerTarget,
     curl_handle: *mut CURL,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ResponseTimings {
     namelookup_time: Duration,
     connect_time: Duration,
@@ -222,25 +334,31 @@ pub struct ResponseTimings {
 }
 
 #[derive(Debug)]
-pub enum RequestError {
+pub struct RequestError {
+    pub error: InnerRequestError,
+    pub target: Target,
+}
+
+#[derive(Debug)]
+pub enum InnerRequestError {
     SetLengthFailed {
         length: usize,
-        path: PathBuf,
         error: io::Error,
     },
     FileWriteFailed {
         length: usize,
-        path: PathBuf,
         error: io::Error,
+    },
+    ResponseNotUtf8 {
+        source: std::str::Utf8Error,
     },
     #[cfg(feature = "memmap")]
     MemoryMapFailed {
         length: usize,
-        path: PathBuf,
         error: io::Error,
     },
     CurlError(curl::Error),
-    MultiError(Vec<RequestError>),
+    MultiError(Vec<InnerRequestError>),
 }
 
 struct ResponseProgress {
@@ -252,15 +370,28 @@ struct ResponseProgress {
     progress_fn: Box<dyn ProgressHandler>,
 }
 
-struct ResponseOutput {
-    path: Option<PathBuf>,
-    file: File,
+enum InnerTarget {
+    Drop,
+    StdOut,
+    StdErr,
+    ToFile {
+        path: PathBuf,
+        file: File,
+        #[cfg(feature = "memmap")]
+        use_mmap: bool,
+    },
+    ToBytes(Vec<u8>),
+    ToString(Vec<u8>),
+    ToWriter(Box<dyn Write>),
     #[cfg(feature = "memmap")]
-    map: Option<MappedFile>,
+    ToMMap {
+        path: PathBuf,
+        map: MappedFile,
+    },
 }
 
 #[cfg(feature = "memmap")]
-struct MappedFile {
+pub struct MappedFile {
     map: MmapMut,
     offset: usize,
     len: usize,
@@ -269,23 +400,12 @@ struct MappedFile {
 impl DurlRequest {
     pub fn new(
         url: &str,
-        path: PathBuf,
-        overwrite_target: bool,
+        target: Target,
         speed_limit: Option<NonZeroU64>,
-        #[cfg(feature = "memmap")] use_mmap: bool,
         verbose_fn: Option<Box<dyn VerboseHandler>>,
         progress_fn: Option<(Duration, u64, Box<dyn ProgressHandler>)>,
     ) -> io::Result<Self> {
-        let handle = DurlRequestHandler::new(
-            url,
-            path,
-            overwrite_target,
-            speed_limit,
-            #[cfg(feature = "memmap")]
-            use_mmap,
-            verbose_fn,
-            progress_fn,
-        )?;
+        let handle = DurlRequestHandler::new(url, target, speed_limit, verbose_fn, progress_fn)?;
         Ok(DurlRequest(handle))
     }
 
@@ -297,28 +417,24 @@ impl DurlRequest {
 impl DurlRequestHandler {
     pub(crate) fn new(
         url: &str,
-        path: PathBuf,
-        overwrite_target: bool,
+        target: Target,
         speed_limit: Option<NonZeroU64>,
-        #[cfg(feature = "memmap")] use_mmap: bool,
         verbose_fn: Option<Box<dyn VerboseHandler>>,
         progress_fn: Option<(Duration, u64, Box<dyn ProgressHandler>)>,
     ) -> io::Result<Easy2<Self>> {
+        let target = target.prepare()?;
         let verbose = verbose_fn.is_some();
         let progress = progress_fn.is_some();
-        let output = ResponseOutput::new(path, overwrite_target)?;
 
         let handler = DurlRequestHandler {
             first_header_in: true,
             read_content_length: false,
             is_redirect: false,
-            #[cfg(feature = "memmap")]
-            use_mmap,
             content_length: None,
             error: None,
             verbose: verbose_fn,
             progress: progress_fn.map(ResponseProgress::new),
-            output,
+            target,
             curl_handle: std::ptr::null_mut(),
         };
 
@@ -376,23 +492,40 @@ impl DurlRequestHandler {
         if let Some(progress) = handle.get_mut().progress.as_mut() {
             progress.start = Instant::now();
         }
-        handle.perform()?;
+        match handle.perform() {
+            Ok(()) => {}
+            Err(err) => handle
+                .get_mut()
+                .set_error(Some(InnerRequestError::CurlError(err))),
+        }
         Self::finish_response(handle)
     }
 
     pub(crate) fn finish_response(mut handle: Easy2<Self>) -> DurlResult {
-        if let Some(err) = handle.get_mut().error.take() {
-            return Err(err);
+        let target = mem::replace(&mut handle.get_mut().target, InnerTarget::Drop);
+        let target = match target.into_target() {
+            Ok(target) => target,
+            Err(err) => {
+                handle.get_mut().set_error(Some(err.error));
+                err.target
+            }
+        };
+
+        if let Some(error) = handle.get_mut().error.take() {
+            return Err(RequestError { error, target });
         }
-        Ok(ResponseTimings {
-            namelookup_time: handle.namelookup_time()?,
-            connect_time: handle.connect_time()?,
-            appconnect_time: handle.appconnect_time()?,
-            pretransfer_time: handle.pretransfer_time()?,
-            starttransfer_time: handle.starttransfer_time()?,
-            redirect_time: handle.redirect_time()?,
-            total_time: handle.total_time()?,
-        })
+
+        let timings = ResponseTimings {
+            namelookup_time: handle.namelookup_time().unwrap_or_default(),
+            connect_time: handle.connect_time().unwrap_or_default(),
+            appconnect_time: handle.appconnect_time().unwrap_or_default(),
+            pretransfer_time: handle.pretransfer_time().unwrap_or_default(),
+            starttransfer_time: handle.starttransfer_time().unwrap_or_default(),
+            redirect_time: handle.redirect_time().unwrap_or_default(),
+            total_time: handle.total_time().unwrap_or_default(),
+        };
+
+        Ok(DurlResponse { target, timings })
     }
 
     fn set_handle(&mut self, handle: *mut CURL) {
@@ -472,15 +605,15 @@ impl DurlRequestHandler {
         Some(())
     }
 
-    pub(crate) fn set_error(&mut self, error: Option<RequestError>) {
+    pub(crate) fn set_error(&mut self, error: Option<InnerRequestError>) {
         if let Some(error) = error {
             let error = match self.error.take() {
                 Some(previous) => match previous {
-                    RequestError::MultiError(mut errors) => {
+                    InnerRequestError::MultiError(mut errors) => {
                         errors.push(error);
-                        RequestError::MultiError(errors)
+                        InnerRequestError::MultiError(errors)
                     }
-                    _ => RequestError::MultiError(vec![previous, error]),
+                    _ => InnerRequestError::MultiError(vec![previous, error]),
                 },
                 None => error,
             };
@@ -489,84 +622,145 @@ impl DurlRequestHandler {
     }
 }
 
-impl ResponseOutput {
-    pub fn new(path: PathBuf, overwrite_target: bool) -> io::Result<Self> {
-        let mut options = OpenOptions::new();
-        options.read(true).write(true);
+impl Target {
+    fn prepare(self) -> io::Result<InnerTarget> {
+        let target = match self {
+            Target::Drop => InnerTarget::Drop,
+            Target::StdOut => InnerTarget::StdOut,
+            Target::StdErr => InnerTarget::StdErr,
+            Target::ToFile {
+                path,
+                overwrite_if_exists,
+                #[cfg(feature = "memmap")]
+                use_mmap,
+            } => {
+                let mut options = OpenOptions::new();
+                options.read(true).write(true);
 
-        if overwrite_target {
-            options.create(true);
-        } else {
-            options.create_new(true);
+                if overwrite_if_exists {
+                    options.create(true);
+                } else {
+                    options.create_new(true);
+                };
+
+                let file = options.open(&path)?;
+                InnerTarget::ToFile {
+                    path,
+                    file,
+                    #[cfg(feature = "memmap")]
+                    use_mmap,
+                }
+            }
+            Target::ToBytes(bytes) => InnerTarget::ToBytes(bytes),
+            Target::ToString(s) => InnerTarget::ToString(s.into()),
+            Target::ToWriter(w) => InnerTarget::ToWriter(w),
         };
 
-        let file = options.open(&path)?;
-        Ok(ResponseOutput {
-            path: Some(path),
-            file,
-            #[cfg(feature = "memmap")]
-            map: None,
-        })
+        Ok(target)
     }
+}
 
-    fn open(
-        &mut self,
-        #[cfg(feature = "memmap")] use_mmap: bool,
-        length: usize,
-    ) -> Result<(), Option<RequestError>> {
-        if let Err(error) = self.file.set_len(length as u64) {
-            return Err(self.path.take().map(|path| RequestError::SetLengthFailed {
-                length,
-                path,
-                error,
-            }));
-        }
-        #[cfg(feature = "memmap")]
-        if use_mmap {
-            let output = match MappedFile::new(&self.file, length) {
-                Ok(output) => output,
-                Err(error) => {
-                    return Err(self.path.take().map(|path| RequestError::MemoryMapFailed {
-                        length,
-                        path,
-                        error,
-                    }));
+impl InnerTarget {
+    fn open(&mut self, length: usize) -> Result<(), Option<InnerRequestError>> {
+        match self {
+            InnerTarget::ToFile {
+                path: _path,
+                file,
+                #[cfg(feature = "memmap")]
+                use_mmap,
+            } => {
+                if let Err(error) = file.set_len(length as u64) {
+                    return Err(Some(InnerRequestError::SetLengthFailed { length, error }));
                 }
-            };
-            self.map = Some(output);
-        }
+
+                #[cfg(feature = "memmap")]
+                if *use_mmap {
+                    let map = match MappedFile::new(file, length) {
+                        Ok(output) => output,
+                        Err(error) => {
+                            return Err(Some(InnerRequestError::MemoryMapFailed { length, error }));
+                        }
+                    };
+                    *self = InnerTarget::ToMMap {
+                        path: mem::take(_path),
+                        map,
+                    };
+                }
+            }
+            InnerTarget::ToBytes(b) | InnerTarget::ToString(b) => {
+                b.reserve_exact(length);
+            }
+            _ => {}
+        };
+
         Ok(())
     }
 
-    #[cfg(not(feature = "memmap"))]
-    fn write(&mut self, data: &[u8]) -> Result<usize, Option<RequestError>> {
-        self.write_file(data)
+    fn write(&mut self, data: &[u8]) -> Result<usize, Option<InnerRequestError>> {
+        match self {
+            InnerTarget::Drop => Ok(data.len()),
+            InnerTarget::StdOut => Self::write_to_write(data, std::io::stdout().lock()),
+            InnerTarget::StdErr => Self::write_to_write(data, std::io::stderr().lock()),
+            InnerTarget::ToFile { file, .. } => Self::write_to_write(data, file),
+            #[cfg(feature = "memmap")]
+            InnerTarget::ToMMap { map, .. } => Ok(map.write(data)),
+            InnerTarget::ToBytes(b) | InnerTarget::ToString(b) => {
+                b.extend_from_slice(data);
+                Ok(data.len())
+            }
+            InnerTarget::ToWriter(w) => Self::write_to_write(data, w),
+        }
     }
 
-    #[cfg(feature = "memmap")]
-    fn write(&mut self, data: &[u8]) -> Result<usize, Option<RequestError>> {
-        self.write_mapped(data)
-    }
-
-    #[inline]
-    fn write_file(&mut self, data: &[u8]) -> Result<usize, Option<RequestError>> {
-        match self.file.write_all(data) {
+    fn write_to_write(
+        data: &[u8],
+        mut target: impl Write,
+    ) -> Result<usize, Option<InnerRequestError>> {
+        match target.write_all(data) {
             Ok(_) => Ok(data.len()),
-            Err(error) => Err(self.path.take().map(|path| RequestError::FileWriteFailed {
+            Err(error) => Err(Some(InnerRequestError::FileWriteFailed {
                 length: data.len(),
-                path,
                 error,
             })),
         }
     }
 
-    #[cfg(feature = "memmap")]
-    #[inline]
-    fn write_mapped(&mut self, data: &[u8]) -> Result<usize, Option<RequestError>> {
-        match &mut self.map {
-            Some(output) => Ok(output.write(data)),
-            None => self.write_file(data),
-        }
+    fn into_target(self) -> Result<Target, RequestError> {
+        let target = match self {
+            InnerTarget::Drop => Target::Drop,
+            InnerTarget::StdOut => Target::StdOut,
+            InnerTarget::StdErr => Target::StdErr,
+            InnerTarget::ToFile {
+                path,
+                file: _,
+                #[cfg(feature = "memmap")]
+                use_mmap,
+            } => Target::ToFile {
+                path,
+                overwrite_if_exists: false,
+                #[cfg(feature = "memmap")]
+                use_mmap,
+            },
+            InnerTarget::ToBytes(b) => Target::ToBytes(b),
+            InnerTarget::ToString(b) => match String::from_utf8(b) {
+                Ok(s) => Target::ToString(s),
+                Err(error) => {
+                    let source = error.utf8_error();
+                    return Err(RequestError {
+                        error: InnerRequestError::ResponseNotUtf8 { source },
+                        target: Target::ToBytes(error.into_bytes()),
+                    });
+                }
+            },
+            InnerTarget::ToWriter(w) => Target::ToWriter(w),
+            #[cfg(feature = "memmap")]
+            InnerTarget::ToMMap { path, .. } => Target::ToFile {
+                path,
+                overwrite_if_exists: false,
+                use_mmap: true,
+            },
+        };
+        Ok(target)
     }
 }
 
@@ -640,18 +834,14 @@ impl Handler for DurlRequestHandler {
         }
         // read content length at first data packet and open file for writing
         if let Some(cl) = self.try_find_content_length() {
-            if let Err(error) = self.output.open(
-                #[cfg(feature = "memmap")]
-                self.use_mmap,
-                cl.get(),
-            ) {
+            if let Err(error) = self.target.open(cl.get()) {
                 self.set_error(error);
                 // signal error to curl
                 return Ok(0);
             }
         }
 
-        match self.output.write(data) {
+        match self.target.write(data) {
             Ok(len) => Ok(len),
             Err(error) => {
                 self.set_error(error);
@@ -703,72 +893,104 @@ impl Handler for DurlRequestHandler {
 
 impl Display for RequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RequestError::SetLengthFailed {
-                length,
-                path,
-                error,
-            } => f.write_fmt(format_args!(
-                "could not set the file size on [{}] to {} bytes: {}",
-                path.display(),
-                length,
-                error
-            )),
-            RequestError::FileWriteFailed {
-                length,
-                path,
-                error,
-            } => f.write_fmt(format_args!(
-                "could write to [{}], num_bytes={}: {}",
-                path.display(),
-                length,
-                error
-            )),
-            #[cfg(feature = "memmap")]
-            RequestError::MemoryMapFailed {
-                length,
-                path,
-                error,
-            } => f.write_fmt(format_args!(
-                "could not memory-map [{}] for writing {} bytes: {}",
-                path.display(),
-                length,
-                error
-            )),
-            RequestError::CurlError(error) => {
-                f.write_fmt(format_args!("Underlying curl error: {}", error))
+        let (plain, file_path);
+        let path: &dyn Display = match &self.target {
+            Target::Drop => {
+                plain = "drop";
+                &plain
             }
-            RequestError::MultiError(errors) => match &errors[..] {
-                [] => f.write_str("Empty errors"),
-                [error] => Display::fmt(error, f),
-                [init @ .., last] => {
-                    f.write_str("Multiple errors: [")?;
-                    for error in init {
-                        f.write_fmt(format_args!("{}, ", error))?;
-                    }
-                    f.write_fmt(format_args!("{}]", last))
+            Target::StdOut => {
+                plain = "stdout";
+                &plain
+            }
+            Target::StdErr => {
+                plain = "stderr";
+                &plain
+            }
+            Target::ToFile { path, .. } => {
+                file_path = path.display();
+                &file_path
+            }
+            Target::ToBytes(_) => {
+                plain = "bytes";
+                &plain
+            }
+            Target::ToString(_) => {
+                plain = "string";
+                &plain
+            }
+            Target::ToWriter(_) => {
+                plain = "writer";
+                &plain
+            }
+        };
+
+        fn fmt_err(
+            f: &mut std::fmt::Formatter<'_>,
+            path: &dyn Display,
+            err: &InnerRequestError,
+        ) -> std::fmt::Result {
+            match err {
+                InnerRequestError::SetLengthFailed { length, error } => f.write_fmt(format_args!(
+                    "could not set the file size on [{}] to {} bytes: {}",
+                    path, length, error
+                )),
+                InnerRequestError::FileWriteFailed { length, error } => f.write_fmt(format_args!(
+                    "could not write to [{}], num_bytes={}: {}",
+                    path, length, error
+                )),
+                InnerRequestError::ResponseNotUtf8 { source } => f.write_fmt(format_args!(
+                    "could not decode the response as UTF-8: {}",
+                    source
+                )),
+                #[cfg(feature = "memmap")]
+                InnerRequestError::MemoryMapFailed { length, error } => f.write_fmt(format_args!(
+                    "could not memory-map [{}] for writing {} bytes: {}",
+                    path, length, error
+                )),
+                InnerRequestError::CurlError(error) => {
+                    f.write_fmt(format_args!("Underlying curl error: {}", error))
                 }
-            },
+                InnerRequestError::MultiError(errors) => match &errors[..] {
+                    [] => f.write_str("Empty errors"),
+                    [error] => fmt_err(f, path, error),
+                    [init @ .., last] => {
+                        f.write_str("Multiple errors: [")?;
+                        for error in init {
+                            fmt_err(f, path, error)?;
+                            f.write_str(", ")?;
+                        }
+                        fmt_err(f, path, last)?;
+                        f.write_str("]")
+                    }
+                },
+            }
         }
+
+        fmt_err(f, path, &self.error)
     }
 }
 
 impl std::error::Error for RequestError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            RequestError::SetLengthFailed { error, .. } => Some(error),
-            RequestError::FileWriteFailed { error, .. } => Some(error),
-            #[cfg(feature = "memmap")]
-            RequestError::MemoryMapFailed { error, .. } => Some(error),
-            RequestError::CurlError(error) => Some(error),
-            RequestError::MultiError(errors) => errors.iter().find_map(|e| e.source()),
+        fn get_source(err: &InnerRequestError) -> Option<&(dyn std::error::Error + 'static)> {
+            match err {
+                InnerRequestError::SetLengthFailed { error, .. } => Some(error),
+                InnerRequestError::FileWriteFailed { error, .. } => Some(error),
+                InnerRequestError::ResponseNotUtf8 { source, .. } => Some(source),
+                #[cfg(feature = "memmap")]
+                InnerRequestError::MemoryMapFailed { error, .. } => Some(error),
+                InnerRequestError::CurlError(error) => Some(error),
+                InnerRequestError::MultiError(errors) => errors.iter().find_map(get_source),
+            }
         }
+        get_source(&self.error)
     }
 }
 
-impl From<curl::Error> for RequestError {
+impl From<curl::Error> for InnerRequestError {
     fn from(val: curl::Error) -> Self {
-        RequestError::CurlError(val)
+        InnerRequestError::CurlError(val)
     }
 }
 
@@ -810,6 +1032,28 @@ where
 
     fn done(&mut self, total: u64, elapsed: Duration) {
         self.0(total, total, elapsed)
+    }
+}
+
+impl std::fmt::Debug for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            &Target::Drop => f.debug_tuple("Drop").finish(),
+            Target::StdOut => f.debug_tuple("StdOut").finish(),
+            Target::StdErr => f.debug_tuple("StdErr").finish(),
+            Target::ToFile {
+                path,
+                overwrite_if_exists,
+                ..
+            } => f
+                .debug_struct("ToFile")
+                .field("path", path)
+                .field("overwrite_if_exists", overwrite_if_exists)
+                .finish_non_exhaustive(),
+            Target::ToBytes(_) => f.debug_tuple("ToBytes").field(&"...").finish(),
+            Target::ToString(_) => f.debug_tuple("ToString").field(&"...").finish(),
+            Target::ToWriter(_) => f.debug_tuple("ToWriter").field(&"...").finish(),
+        }
     }
 }
 
