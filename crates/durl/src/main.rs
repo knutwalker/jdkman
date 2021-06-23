@@ -4,11 +4,15 @@ use libjdkman::{eprint_color, eprintln_red};
 use std::{error::Error, time::Duration};
 use ubyte::ByteUnit;
 
-fn print_response(verbose: bool, response: DurlResult) {
+fn print_response(verbose: bool, print_to_stdout: bool, response: DurlResult) {
     match response {
         Ok(response) => {
             if verbose {
-                println!("{:#?}", response);
+                if print_to_stdout {
+                    println!("{:#?}", response);
+                } else {
+                    eprintln!("{:#?}", response);
+                }
             }
         }
         Err(err) => {
@@ -77,6 +81,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             Ok(Target::file(s, false))
         }
     })?;
+    let target_is_stdout = matches!(target, Target::StdOut);
 
     let force_flag = args.contains(["-f", "--force"]);
     target.set_overwrite_if_exists(force_flag);
@@ -131,11 +136,15 @@ For more information try --help
 
     // print version line
     if verbose_flag {
-        libdurl::print_version();
+        if target_is_stdout {
+            libdurl::print_version(std::io::stderr());
+        } else {
+            libdurl::print_version(std::io::stdout());
+        }
     }
 
     let response = request.perform();
-    print_response(verbose_flag, response);
+    print_response(verbose_flag, !target_is_stdout, response);
 
     Ok(())
 }
