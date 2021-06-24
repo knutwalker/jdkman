@@ -36,6 +36,15 @@ macro_rules! help {
         );
     };
 
+    ("install", $wants_help:ident) => {
+        help!(
+            $wants_help,
+            "install",
+            "Install a new version for further use.\n\n",
+            include_str!("help_install.txt"),
+        );
+    };
+
     ("use", $wants_help:ident) => {
         help!(
             $wants_help,
@@ -156,26 +165,9 @@ impl std::error::Error for InvalidPath {}
 fn run_use(query: Option<&OsStr>, verbose: bool) -> Result<()> {
     let use_result = JdkUse::run(query, verbose)?;
     match use_result {
-        UseResult::Use {
-            name,
-            java_home,
-            path,
-        } => {
-            eprintln_green!("Using java version {} in this shell.", name);
-            let java_home = std::env::join_paths([java_home])?;
-            let java_home = java_home.to_str().ok_or(InvalidPath)?;
-            let path = path
-                .as_ref()
-                .map(|p| p.to_str().ok_or(InvalidPath))
-                .transpose()?;
-
-            println!("export JAVA_HOME={}", java_home);
-            if let Some(path) = path {
-                println!("export PATH={}", path);
-            }
-        }
+        UseResult::Use(using) => print_using(using)?,
         UseResult::Invalid(Some(name)) => {
-            eprintln_red!("Stop! Candidate version {} is not installed.", name);
+            eprintln_red!("Stop! Candidate version {} is not installed.", name)
         }
         UseResult::Invalid(None) => {
             eprintln_red!("Stop! Candidate version is not installed.");
@@ -185,11 +177,44 @@ fn run_use(query: Option<&OsStr>, verbose: bool) -> Result<()> {
     Ok(())
 }
 
+fn print_using(
+    Using {
+        name,
+        java_home,
+        path,
+    }: Using,
+) -> Result<()> {
+    let path = path
+        .as_ref()
+        .map(|p| p.to_str().ok_or(InvalidPath))
+        .transpose()?;
+
+    eprintln_green!("Using java version {} in this shell.", name);
+    println!("export JAVA_HOME=\"{}\"", java_home.display());
+    if let Some(path) = path {
+        println!("export PATH=\"{}\"", path);
+    }
+    Ok(())
+}
+
+fn print_changed_default(change: ChangedDefault) {
+    match change {
+        ChangedDefault {
+            name,
+            before: Some(before),
+        } => {
+            eprintln_green!("Default java version set from {} to {}", before, name);
+        }
+        ChangedDefault { name, .. } => {
+            eprintln_green!("Default java version set to {}", name);
+        }
+    }
+}
+
 pub(crate) fn run() -> Result<()> {
     let mut args = pico_args::Arguments::from_env();
     let wants_help = args.contains(["-h", "--help"]);
     let verbose_flag = args.contains(["-v", "--verbose"]);
-    let all_flag = args.contains(["-a", "--all"]);
     let subcommand = args.subcommand()?;
 
     match subcommand.as_deref() {
@@ -204,8 +229,9 @@ pub(crate) fn run() -> Result<()> {
         }
         Some("default" | "d") => {
             help!("default", wants_help);
+            let show_suggested_default = args.contains("--suggest");
             let query = expect_query_arg(args)?;
-            let result = JdkDefault::run(query, verbose_flag)?;
+            let result = JdkDefault::run(query, show_suggested_default, verbose_flag)?;
             match result {
                 DefaultResult::KeepCurrent => {}
                 DefaultResult::CandidateNotFound { query: Some(name) } => {
@@ -214,19 +240,58 @@ pub(crate) fn run() -> Result<()> {
                 DefaultResult::CandidateNotFound { .. } => {
                     eprintln_red!("Stop! Candidate version is not installed.");
                 }
-                DefaultResult::Selected {
-                    name,
-                    before: Some(before),
-                } => {
-                    eprintln_green!("Default java version set from {} to {}", before, name);
+                DefaultResult::Selected(change) => print_changed_default(change),
+                DefaultResult::Suggest(name) => {
+                    eprintln_yellow!("Suggested default version: {}", name);
                 }
-                DefaultResult::Selected { name, .. } => {
-                    eprintln_green!("Default java version set to {}", name);
+            }
+        }
+        Some("install" | "i" | "in") => {
+            help!("install", wants_help);
+            let set_default = args.contains(["-d", "--set-default"]);
+            let set_use = args.contains(["-u", "--use"]);
+            let validate = !args.contains("--unchecked");
+            let use_suggested = args.contains("--suggested");
+            let candidate = expect_query_arg(args)?;
+            let candidate = candidate.and_then(|c| c.into_string().ok());
+            let candidate = candidate.as_deref().unwrap_or_default();
+
+            let result = JdkInstall::run(verbose_flag, use_suggested, validate, candidate);
+            match result {
+                Ok(candidate) => {
+                    eprintln_green!("Done installing {}!", candidate.name());
+
+                    if set_default {
+                        let change = JdkDefault::set(candidate.clone())?;
+                        print_changed_default(change);
+                    }
+                    if set_use {
+                        let using = JdkUse::set(candidate);
+                        print_using(using)?;
+                    }
                 }
+                Err(err) => match err {
+                    InstallError::AlreadyInstalled(v) => {
+                        eprintln_yellow!("java {} is already installed.", v);
+                    }
+                    InstallError::InvalidVersion(v) => {
+                        eprintln_red!("Stop! {} is not a valid java version.", v);
+                    }
+                    InstallError::ArchiveCorrupt(v, archive) => {
+                        eprintln_red!("Stop! {} could not be installed because the archive '{}' is corrupt. This could be due to a download or disk error. Remove the archive if it still exists and try again.", v, archive.display());
+                    }
+                    InstallError::DownloadError(err) => {
+                        eprintln_red!("Stop! Could not download java {}: {}", candidate, err);
+                    }
+                    InstallError::Other(err) => {
+                        eprintln_red!("Stop! Could not install java {}: {}", candidate, err);
+                    }
+                },
             }
         }
         Some("list" | "ll" | "ls" | "l") => {
             help!("list", wants_help);
+            let all_flag = args.contains(["-a", "--all"]);
             expect_no_more_args(args)?;
             let result = JdkList::run(verbose_flag, all_flag)?;
             eprint!("{}", result);

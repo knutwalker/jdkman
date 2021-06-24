@@ -316,6 +316,23 @@ impl Target {
             )
         })
     }
+
+    pub fn try_bytes(self) -> Result<Vec<u8>, Self> {
+        match self {
+            Target::ToString(s) => Ok(s.into_bytes()),
+            Target::ToBytes(bytes) => Ok(bytes),
+            otherwise => Err(otherwise),
+        }
+    }
+
+    pub fn expect_bytes(self) -> Vec<u8> {
+        self.try_bytes().unwrap_or_else(|otherwise| {
+            panic!(
+                "Unexpected target, required ToBytes or ToString but got {:?}",
+                otherwise
+            )
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -354,13 +371,13 @@ pub(crate) struct DurlRequestHandler {
 
 #[derive(Debug, Default)]
 pub struct ResponseTimings {
-    namelookup_time: Duration,
-    connect_time: Duration,
-    appconnect_time: Duration,
-    pretransfer_time: Duration,
-    starttransfer_time: Duration,
-    redirect_time: Duration,
-    total_time: Duration,
+    pub namelookup: Duration,
+    pub connect: Duration,
+    pub appconnect: Duration,
+    pub pretransfer: Duration,
+    pub starttransfer: Duration,
+    pub redirect: Duration,
+    pub total: Duration,
 }
 
 #[derive(Debug)]
@@ -546,13 +563,13 @@ impl DurlRequestHandler {
         }
 
         let timings = ResponseTimings {
-            namelookup_time: handle.namelookup_time().unwrap_or_default(),
-            connect_time: handle.connect_time().unwrap_or_default(),
-            appconnect_time: handle.appconnect_time().unwrap_or_default(),
-            pretransfer_time: handle.pretransfer_time().unwrap_or_default(),
-            starttransfer_time: handle.starttransfer_time().unwrap_or_default(),
-            redirect_time: handle.redirect_time().unwrap_or_default(),
-            total_time: handle.total_time().unwrap_or_default(),
+            namelookup: handle.namelookup_time().unwrap_or_default(),
+            connect: handle.connect_time().unwrap_or_default(),
+            appconnect: handle.appconnect_time().unwrap_or_default(),
+            pretransfer: handle.pretransfer_time().unwrap_or_default(),
+            starttransfer: handle.starttransfer_time().unwrap_or_default(),
+            redirect: handle.redirect_time().unwrap_or_default(),
+            total: handle.total_time().unwrap_or_default(),
         };
 
         Ok(DurlResponse { target, timings })

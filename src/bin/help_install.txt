@@ -1,0 +1,25 @@
+OPTIONS:
+    -d, --set-default  After successful installation, set the installed
+                       candidate version as the new default
+    -u, --use          After successful installation, set the installed
+                       candidate version as the current version for this shell
+        --suggested    Install the suggested default version
+        --unchecked    Do not validate that the candidate is a valid candidate
+                       that is known to sdkman
+
+ARGS:
+    <VERSION>        Candidate version to isntall
+
+
+This command will always install a remote candidate. To link a locally 
+available version, use `{bin} link <FOLDER> <CANDIDATE>`.
+
+Using `-d, --set-default` has the same effect as calling
+`{bin} default <VERSION>` after this command.
+Using `-u, --use` has the same effect as calling
+`{bin} use <VERSION>` after this command.
+
+If `--suggested` is given, the <CANDIDATE> can be empty and will be ignored.
+
+To see which versions are available for installation, use `{bin} list --all`.
+

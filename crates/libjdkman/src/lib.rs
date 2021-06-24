@@ -9,7 +9,7 @@ pub mod prelude {
     pub use crate::{
         candidate::Candidate,
         commands::results::*,
-        commands::{JdkCurrent, JdkDefault, JdkList, JdkUse},
+        commands::{JdkCurrent, JdkDefault, JdkInstall, JdkList, JdkUse},
         eprintln_color, eprintln_green, eprintln_red, eprintln_yellow,
         sdkman::{candidates_api, candidates_dir, platform},
     };

@@ -1,5 +1,8 @@
+OPTIONS:
+        --suggest    Suggest the default version to use without setting it
+
 ARGS:
-    <QUERY>    Optional query to start a selection.
+    <QUERY>    Optional query to start a selection
 
 If QUERY is missing, all available candidates will be offered for selection via
 fzf. If QUERY can only lead to a single selection, that option will be chosen

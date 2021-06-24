@@ -46,6 +46,16 @@ pub fn candidates_dir() -> &'static Path {
     SDKMAN_CANDIDATES_DIR.get_or_init(|| find())
 }
 
+pub fn archives_dir() -> &'static Path {
+    static SDKMAN_ARCHIVES_DIR: OnceCell<PathBuf> = OnceCell::new();
+    SDKMAN_ARCHIVES_DIR.get_or_init(|| sdkman_dir().join("archives"))
+}
+
+pub fn temp_dir() -> &'static Path {
+    static SDKMAN_TEMP_DIR: OnceCell<PathBuf> = OnceCell::new();
+    SDKMAN_TEMP_DIR.get_or_init(|| sdkman_dir().join("tmp"))
+}
+
 pub fn candidates_api() -> &'static str {
     fn find() -> io::Result<String> {
         let api = env::var_os("JDKMAN_CANDIDATES_API")

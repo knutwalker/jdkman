@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, Eq)]
+#[derive(Debug, Eq, Clone)]
 pub struct Candidate {
     version: Option<Version>,
     path: PathBuf,
@@ -68,7 +68,7 @@ impl Borrow<str> for Candidate {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct Version {
     major: u64,
     minor: u64,
