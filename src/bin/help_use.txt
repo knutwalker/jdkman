@@ -21,7 +21,7 @@ With the current environment, the following fzf will be used:
 
 Upon successful execution, {bin} prints shell code to stdout that needs to be
 evaluated in order to provide all the functionality, e.g. with
-`jdk () {{ $({bin} "$*") }}`.
+`jdk () {{ eval $({bin} "$@") }}`.
 
 All informational messages are printed to stderr, even if they are not
 necessarily an error. This is done so that stdout can always be `eval`-ed.
