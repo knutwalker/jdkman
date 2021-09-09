@@ -412,7 +412,47 @@ mod install_command {
             version
         };
 
-        // validate version
+        let candidates_path = validate_candidate(
+            candidates_dir,
+            candidates_api,
+            platform,
+            verbose,
+            validate_version,
+            version,
+        )?;
+
+        let zip_archive_target = archives_dir.join(format!("java-{}.zip", version));
+
+        // download unless file already exists
+        if !matches!(fs::symlink_metadata(&zip_archive_target), Ok(meta) if meta.is_file()) {
+            download(
+                temp_dir,
+                candidates_api,
+                platform,
+                verbose,
+                version,
+                &zip_archive_target,
+            )?;
+        } else {
+            eprintln!(
+                "Found a previously downloaded java {} archive. Not downloading it again...",
+                version
+            );
+        }
+
+        let zip_archive_target = validate_archive(version, zip_archive_target)?;
+
+        install_archive(temp_dir, version, candidates_path, zip_archive_target)
+    }
+
+    pub(super) fn validate_candidate(
+        candidates_dir: &Path,
+        candidates_api: &str,
+        platform: &str,
+        verbose: bool,
+        validate_version: bool,
+        version: &str,
+    ) -> Result<PathBuf, InstallError> {
         let candidates_path = candidates_dir.join(version);
         if matches!(fs::symlink_metadata(&candidates_path), Ok(existing) if !existing.is_file()) {
             return Err(InstallError::AlreadyInstalled(version.into()));
@@ -424,54 +464,60 @@ mod install_command {
             }
         };
 
-        let zip_archive_target = archives_dir.join(format!("java-{}.zip", version));
+        Ok(candidates_path)
+    }
 
-        // download unless file already exists
-        if !matches!(fs::symlink_metadata(&zip_archive_target), Ok(meta) if meta.is_file()) {
-            pre_install(temp_dir, candidates_api, platform, verbose, version)?;
+    pub(super) fn download(
+        temp_dir: &Path,
+        candidates_api: &str,
+        platform: &str,
+        verbose: bool,
+        version: &str,
+        zip_archive_target: &Path,
+    ) -> Result<(), InstallError> {
+        pre_install(temp_dir, candidates_api, platform, verbose, version)?;
 
-            let url = format!(
-                "{api}/broker/download/java/{version}/{platform}",
-                api = candidates_api,
-                version = version,
-                platform = platform
-            );
+        let url = format!(
+            "{api}/broker/download/java/{version}/{platform}",
+            api = candidates_api,
+            version = version,
+            platform = platform
+        );
 
-            let binary_input = temp_dir.join(format!("java-{}.bin", version));
+        let binary_input = temp_dir.join(format!("java-{}.bin", version));
 
-            let response = DurlRequestBuilder::new()
-                .progress_bar()
-                .progress_min_download(100_u64 << 10) // 100 KiB
-                .progress_interval(Duration::from_millis(50)) // 20 fps
-                .verbose_fn_if(verbose, super::shared::print_verbose)
-                .url(&url)
-                .write_to_file(true, &binary_input)
-                .build()?
-                .perform()?;
+        let response = DurlRequestBuilder::new()
+            .progress_bar()
+            .progress_min_download(100_u64 << 10) // 100 KiB
+            .progress_interval(Duration::from_millis(50)) // 20 fps
+            .verbose_fn_if(verbose, super::shared::print_verbose)
+            .url(&url)
+            .write_to_file(true, &binary_input)
+            .build()?
+            .perform()?;
 
-            if verbose {
-                eprintln_color!(@Style::new().for_stderr().dim(), "Downloaded binary to {} in {:?}", binary_input.display(), response.timings.total);
-            }
-
-            let zip_output = post_install(
-                temp_dir,
-                candidates_api,
-                platform,
-                verbose,
-                version,
-                binary_input,
-            )?;
-
-            dbg!(fs::rename(dbg!(zip_output), dbg!(&zip_archive_target)))?;
-        } else {
-            eprintln!(
-                "Found a previously downloaded java {} archive. Not downloading it again...",
-                version
-            );
+        if verbose {
+            eprintln_color!(@Style::new().for_stderr().dim(), "Downloaded binary to {} in {:?}", binary_input.display(), response.timings.total);
         }
 
-        // validate zip file
+        let zip_output = post_install(
+            temp_dir,
+            candidates_api,
+            platform,
+            verbose,
+            version,
+            binary_input,
+        )?;
 
+        dbg!(fs::rename(dbg!(zip_output), dbg!(&zip_archive_target)))?;
+
+        Ok(())
+    }
+
+    pub(super) fn validate_archive(
+        version: &str,
+        zip_archive_target: PathBuf,
+    ) -> Result<PathBuf, InstallError> {
         let output = Command::new("unzip")
             .arg("-t")
             .arg(&zip_archive_target)
@@ -493,8 +539,15 @@ mod install_command {
             ));
         }
 
-        // unzip - the actual install
+        Ok(zip_archive_target)
+    }
 
+    pub(super) fn install_archive(
+        temp_dir: &Path,
+        version: &str,
+        candidates_path: PathBuf,
+        zip_archive_target: PathBuf,
+    ) -> InstallResult {
         let out = temp_dir.join("out");
         try_fs(|| fs::remove_dir_all(&out))?;
 
@@ -704,13 +757,13 @@ mod shared {
             .return_as_string()
             .build()?
             .perform()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(|e| e.into_io_error())?;
 
         if verbose {
             eprintln_color!(@Style::new().for_stderr().dim(), "{:#?}", response.timings);
         }
 
-        Ok(response.target.expect_string())
+        Ok(response.output)
     }
 
     pub(super) fn print_verbose(msg: VerboseMessage, data: &[u8]) {
