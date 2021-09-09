@@ -1,7 +1,7 @@
 use crate::{
     request::DurlRequestHandler,
     selector::{ActiveSockets, SocketInterest},
-    DurlRequest, DurlResult, Result,
+    DurlRequest, DurlResult, FromTarget, Result,
 };
 use curl::multi::{Easy2Handle, Multi};
 use nohash_hasher::IntSet;
@@ -14,22 +14,22 @@ use std::{
     time::Duration,
 };
 
-type DurlResultCallback = dyn FnOnce(DurlResult);
+type DurlResultCallback<T> = dyn FnOnce(DurlResult<T>);
 
-struct RequestHandle {
+struct RequestHandle<T> {
     handle: Easy2Handle<DurlRequestHandler>,
-    callback: Option<Box<DurlResultCallback>>,
+    callback: Option<Box<DurlResultCallback<T>>>,
 }
 
-pub struct DurlClient {
+pub struct DurlClient<T> {
     multi: Multi,
-    requests: Slab<RequestHandle>,
+    requests: Slab<RequestHandle<T>>,
     finished: IntSet<usize>,
     timeout_micros: Arc<AtomicI64>,
     active_sockets: ActiveSockets,
 }
 
-impl DurlClient {
+impl<T: FromTarget> DurlClient<T> {
     pub fn new() -> Result<Self> {
         let mut multi = Multi::new();
 
@@ -59,26 +59,26 @@ impl DurlClient {
         })
     }
 
-    pub fn fire_and_forget_request<F>(&mut self, req: DurlRequest) -> Result<()> {
+    pub fn fire_and_forget_request<F>(&mut self, req: DurlRequest<T>) -> Result<()> {
         self.register_request(req, None)
     }
 
-    pub fn add_request<F>(&mut self, req: DurlRequest, action: F) -> Result<()>
+    pub fn add_request<F>(&mut self, req: DurlRequest<T>, action: F) -> Result<()>
     where
-        F: FnOnce(DurlResult) + 'static,
+        F: FnOnce(DurlResult<T>) + 'static,
     {
         self.register_request(req, Some(Box::new(action)))
     }
 
     fn register_request(
         &mut self,
-        req: DurlRequest,
-        callback: Option<Box<DurlResultCallback>>,
+        req: DurlRequest<T>,
+        callback: Option<Box<DurlResultCallback<T>>>,
     ) -> Result<()> {
         let entry = self.requests.vacant_entry();
         let id = entry.key();
 
-        let mut handle = self.multi.add2(req.0)?;
+        let mut handle = self.multi.add2(req.handler)?;
         handle.set_token(id)?;
 
         let handle = RequestHandle { handle, callback };

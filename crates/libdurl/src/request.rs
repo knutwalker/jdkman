@@ -15,13 +15,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub type DurlResult = Result<DurlResponse, RequestError>;
+pub type DurlResult<T> = Result<DurlResponse<T>, RequestError>;
 
-pub struct DurlRequest(pub(crate) Easy2<DurlRequestHandler>);
+pub struct DurlRequest<T> {
+    pub(crate) handler: Easy2<DurlRequestHandler>,
+    _output: PhantomData<T>,
+}
 
 #[derive(Debug)]
-pub struct DurlResponse {
-    pub target: Target,
+pub struct DurlResponse<T> {
+    pub output: T,
     pub timings: ResponseTimings,
 }
 
@@ -29,7 +32,7 @@ pub enum Uninitialized {}
 pub enum OutputStage {}
 pub enum BuildStage {}
 
-pub struct DurlRequestBuilder<'url, Stage> {
+pub struct DurlRequestBuilder<'url, T, Stage> {
     speed_limit: Option<NonZeroU64>,
 
     progress_interval: Duration,
@@ -41,10 +44,11 @@ pub struct DurlRequestBuilder<'url, Stage> {
     url: Option<&'url str>,
     target: Option<Target>,
 
+    _output: PhantomData<T>,
     _stage: PhantomData<Stage>,
 }
 
-impl<S> DurlRequestBuilder<'_, S> {
+impl<T, S> DurlRequestBuilder<'_, T, S> {
     /// bytes per second, 0 = disable
     pub fn limit_speed(&mut self, bytes_per_second: u64) -> &mut Self {
         self.speed_limit = NonZeroU64::new(bytes_per_second);
@@ -101,7 +105,7 @@ impl<S> DurlRequestBuilder<'_, S> {
     }
 }
 
-impl DurlRequestBuilder<'static, Uninitialized> {
+impl DurlRequestBuilder<'static, (), Uninitialized> {
     pub fn new() -> Self {
         DurlRequestBuilder {
             speed_limit: None,
@@ -111,11 +115,12 @@ impl DurlRequestBuilder<'static, Uninitialized> {
             verbose_fn: None,
             url: None,
             target: None,
+            _output: PhantomData,
             _stage: PhantomData,
         }
     }
 
-    pub fn url<'url>(&mut self, url: &'url str) -> DurlRequestBuilder<'url, OutputStage> {
+    pub fn url<'url>(&mut self, url: &'url str) -> DurlRequestBuilder<'url, (), OutputStage> {
         DurlRequestBuilder {
             speed_limit: self.speed_limit,
             progress_interval: self.progress_interval,
@@ -124,17 +129,18 @@ impl DurlRequestBuilder<'static, Uninitialized> {
             verbose_fn: self.verbose_fn.take(),
             url: Some(url),
             target: None,
+            _output: PhantomData,
             _stage: PhantomData,
         }
     }
 }
 
-impl<'url> DurlRequestBuilder<'url, OutputStage> {
+impl<'url> DurlRequestBuilder<'url, (), OutputStage> {
     pub fn write_to_file(
         &mut self,
         overwrite_if_exists: bool,
         output: impl Into<PathBuf>,
-    ) -> DurlRequestBuilder<'url, BuildStage> {
+    ) -> DurlRequestBuilder<'url, PathBuf, BuildStage> {
         self.target(Target::file(output, overwrite_if_exists))
     }
 
@@ -143,63 +149,72 @@ impl<'url> DurlRequestBuilder<'url, OutputStage> {
         &mut self,
         overwrite_if_exists: bool,
         output: impl Into<PathBuf>,
-    ) -> DurlRequestBuilder<'url, BuildStage> {
+    ) -> DurlRequestBuilder<'url, PathBuf, BuildStage> {
         self.target(Target::memory_mapped_file(output, overwrite_if_exists))
     }
 
-    pub fn write_to_stdout(&mut self) -> DurlRequestBuilder<'url, BuildStage> {
+    pub fn write_to_stdout(&mut self) -> DurlRequestBuilder<'url, (), BuildStage> {
         self.target(Target::stdout())
     }
 
-    pub fn write_to_sterr(&mut self) -> DurlRequestBuilder<'url, BuildStage> {
+    pub fn write_to_sterr(&mut self) -> DurlRequestBuilder<'url, (), BuildStage> {
         self.target(Target::stderr())
     }
 
-    pub fn return_as_bytes(&mut self) -> DurlRequestBuilder<'url, BuildStage> {
+    pub fn return_as_bytes(&mut self) -> DurlRequestBuilder<'url, Vec<u8>, BuildStage> {
         self.append_to_bytes(Vec::new())
     }
 
     pub fn return_as_bytes_with_capacity(
         &mut self,
         capacity: usize,
-    ) -> DurlRequestBuilder<'url, BuildStage> {
+    ) -> DurlRequestBuilder<'url, Vec<u8>, BuildStage> {
         self.append_to_bytes(Vec::with_capacity(capacity))
     }
 
-    pub fn append_to_bytes(&mut self, bytes: Vec<u8>) -> DurlRequestBuilder<'url, BuildStage> {
-        self.target(Target::ToBytes(bytes))
+    pub fn append_to_bytes(
+        &mut self,
+        bytes: Vec<u8>,
+    ) -> DurlRequestBuilder<'url, Vec<u8>, BuildStage> {
+        self.target(WriteToBytes(bytes))
     }
 
-    pub fn return_as_string(&mut self) -> DurlRequestBuilder<'url, BuildStage> {
+    pub fn return_as_string(&mut self) -> DurlRequestBuilder<'url, String, BuildStage> {
         self.append_to_string(String::new())
     }
 
     pub fn return_as_string_with_capacity(
         &mut self,
         capacity: usize,
-    ) -> DurlRequestBuilder<'url, BuildStage> {
+    ) -> DurlRequestBuilder<'url, String, BuildStage> {
         self.append_to_string(String::with_capacity(capacity))
     }
 
-    pub fn append_to_string(&mut self, string: String) -> DurlRequestBuilder<'url, BuildStage> {
-        self.target(Target::ToString(string))
+    pub fn append_to_string(
+        &mut self,
+        string: String,
+    ) -> DurlRequestBuilder<'url, String, BuildStage> {
+        self.target(WriteToString(string))
     }
 
     pub fn write_to_writer(
         &mut self,
-        writer: impl Write + Send + Sync + 'static,
-    ) -> DurlRequestBuilder<'url, BuildStage> {
-        self.target(Target::ToWriter(Box::new(writer)))
+        writer: impl Write + 'static,
+    ) -> DurlRequestBuilder<'url, (), BuildStage> {
+        self.target(WriteToWriter(Box::new(writer)))
     }
 
     pub fn write_to_boxed_writer(
         &mut self,
-        writer: impl Into<Box<dyn Write + Send + Sync>>,
-    ) -> DurlRequestBuilder<'url, BuildStage> {
-        self.target(Target::ToWriter(writer.into()))
+        writer: impl Into<Box<dyn Write>>,
+    ) -> DurlRequestBuilder<'url, (), BuildStage> {
+        self.target(WriteToWriter(writer.into()))
     }
 
-    pub fn target(&mut self, target: Target) -> DurlRequestBuilder<'url, BuildStage> {
+    pub fn target<T: ToTarget>(
+        &mut self,
+        target: T,
+    ) -> DurlRequestBuilder<'url, T::Output, BuildStage> {
         DurlRequestBuilder {
             speed_limit: self.speed_limit,
             progress_interval: self.progress_interval,
@@ -207,14 +222,15 @@ impl<'url> DurlRequestBuilder<'url, OutputStage> {
             progress_fn: self.progress_fn.take(),
             verbose_fn: self.verbose_fn.take(),
             url: self.url.take(),
-            target: Some(target),
+            target: Some(target.to_target()),
+            _output: PhantomData,
             _stage: PhantomData,
         }
     }
 }
 
-impl DurlRequestBuilder<'_, BuildStage> {
-    pub fn build(&mut self) -> io::Result<DurlRequest> {
+impl<T> DurlRequestBuilder<'_, T, BuildStage> {
+    pub fn build(&mut self) -> io::Result<DurlRequest<T>> {
         DurlRequest::new(
             self.url.take().unwrap(),
             self.target.take().unwrap(),
@@ -227,10 +243,155 @@ impl DurlRequestBuilder<'_, BuildStage> {
     }
 }
 
-impl Default for DurlRequestBuilder<'static, Uninitialized> {
+impl Default for DurlRequestBuilder<'static, (), Uninitialized> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub trait ToTarget: private::SealedToTarget {
+    type Output;
+
+    fn to_target(self) -> Target;
+}
+
+pub trait FromTarget: private::SealedFromTarget + Sized {
+    fn from_target(target: Target) -> Result<Self, Target>;
+}
+
+pub struct DropResponse;
+pub struct WriteToStdOut;
+pub struct WriteToStdErr;
+pub struct WriteToFile {
+    path: PathBuf,
+    overwrite_if_exists: bool,
+    #[cfg(feature = "memmap")]
+    use_mmap: bool,
+}
+
+pub struct WriteToBytes(Vec<u8>);
+pub struct WriteToString(String);
+pub struct WriteToWriter(Box<dyn Write>);
+
+impl ToTarget for DropResponse {
+    type Output = ();
+
+    fn to_target(self) -> Target {
+        Target::Drop
+    }
+}
+
+impl ToTarget for WriteToStdOut {
+    type Output = ();
+
+    fn to_target(self) -> Target {
+        Target::StdOut
+    }
+}
+
+impl ToTarget for WriteToStdErr {
+    type Output = ();
+
+    fn to_target(self) -> Target {
+        Target::StdErr
+    }
+}
+
+impl ToTarget for WriteToFile {
+    type Output = PathBuf;
+
+    fn to_target(self) -> Target {
+        Target::ToFile {
+            path: self.path,
+            overwrite_if_exists: self.overwrite_if_exists,
+            #[cfg(feature = "memmap")]
+            use_mmap: self.use_mmap,
+        }
+    }
+}
+
+impl ToTarget for WriteToBytes {
+    type Output = Vec<u8>;
+
+    fn to_target(self) -> Target {
+        Target::ToBytes(self.0)
+    }
+}
+
+impl ToTarget for WriteToString {
+    type Output = String;
+
+    fn to_target(self) -> Target {
+        Target::ToString(self.0)
+    }
+}
+
+impl ToTarget for WriteToWriter {
+    type Output = ();
+
+    fn to_target(self) -> Target {
+        Target::ToWriter(self.0)
+    }
+}
+
+impl FromTarget for () {
+    fn from_target(_target: Target) -> Result<Self, Target> {
+        Ok(())
+    }
+}
+
+impl FromTarget for PathBuf {
+    fn from_target(target: Target) -> Result<Self, Target> {
+        match target {
+            Target::ToFile { path, .. } => Ok(path),
+            otherwise => Err(otherwise),
+        }
+    }
+}
+
+impl FromTarget for Vec<u8> {
+    fn from_target(target: Target) -> Result<Self, Target> {
+        match target {
+            Target::ToString(s) => Ok(s.into_bytes()),
+            Target::ToBytes(bytes) => Ok(bytes),
+            otherwise => Err(otherwise),
+        }
+    }
+}
+
+impl FromTarget for String {
+    fn from_target(target: Target) -> Result<Self, Target> {
+        match target {
+            Target::ToString(s) => Ok(s),
+            Target::ToBytes(bytes) => match String::from_utf8(bytes) {
+                Ok(s) => Ok(s),
+                Err(invalid) => Err(Target::ToBytes(invalid.into_bytes())),
+            },
+            otherwise => Err(otherwise),
+        }
+    }
+}
+
+mod private {
+    macro_rules! impl_sealed {
+        ($tr:ty, $($st:ty),*$(,)?) => {
+            $(impl $tr for $st {})*
+        };
+    }
+    pub trait SealedFromTarget {}
+    pub trait SealedToTarget {}
+
+    impl_sealed!(
+        SealedToTarget,
+        super::DropResponse,
+        super::WriteToStdOut,
+        super::WriteToStdErr,
+        super::WriteToFile,
+        super::WriteToBytes,
+        super::WriteToString,
+        super::WriteToWriter,
+    );
+    impl_sealed!(SealedFromTarget, (), std::path::PathBuf, Vec<u8>, String);
 }
 
 pub enum Target {
@@ -245,28 +406,28 @@ pub enum Target {
     },
     ToBytes(Vec<u8>),
     ToString(String),
-    ToWriter(Box<dyn Write + Send + Sync>),
+    ToWriter(Box<dyn Write>),
 }
 
 impl Target {
-    pub const fn stdout() -> Self {
-        Self::StdOut
+    pub const fn stdout() -> WriteToStdOut {
+        WriteToStdOut
     }
 
-    pub const fn stderr() -> Self {
-        Self::StdErr
+    pub const fn stderr() -> WriteToStdErr {
+        WriteToStdErr
     }
 
-    pub const fn bytes() -> Self {
-        Self::ToBytes(Vec::new())
+    pub const fn bytes() -> WriteToBytes {
+        WriteToBytes(Vec::new())
     }
 
-    pub const fn string() -> Self {
-        Self::ToString(String::new())
+    pub const fn string() -> WriteToString {
+        WriteToString(String::new())
     }
 
-    pub fn file(path: impl Into<PathBuf>, overwrite_if_exists: bool) -> Self {
-        Self::ToFile {
+    pub fn file(path: impl Into<PathBuf>, overwrite_if_exists: bool) -> WriteToFile {
+        WriteToFile {
             path: path.into(),
             overwrite_if_exists,
             #[cfg(feature = "memmap")]
@@ -275,16 +436,16 @@ impl Target {
     }
 
     #[cfg(feature = "memmap")]
-    pub fn memory_mapped_file(path: impl Into<PathBuf>, overwrite_if_exists: bool) -> Self {
-        Self::ToFile {
+    pub fn memory_mapped_file(path: impl Into<PathBuf>, overwrite_if_exists: bool) -> WriteToFile {
+        WriteToFile {
             path: path.into(),
             overwrite_if_exists,
             use_mmap: true,
         }
     }
 
-    pub fn writer(writer: impl Write + Send + Sync + 'static) -> Self {
-        Self::ToWriter(Box::new(writer))
+    pub fn writer(writer: impl Write + 'static) -> WriteToWriter {
+        WriteToWriter(Box::new(writer))
     }
 
     pub fn set_overwrite_if_exists(&mut self, overwrite_if_exists_value: bool) {
@@ -295,43 +456,6 @@ impl Target {
         {
             *overwrite_if_exists = overwrite_if_exists_value;
         }
-    }
-
-    pub fn try_string(self) -> Result<String, Self> {
-        match self {
-            Target::ToString(s) => Ok(s),
-            Target::ToBytes(bytes) => match String::from_utf8(bytes) {
-                Ok(s) => Ok(s),
-                Err(invalid) => Err(Target::ToBytes(invalid.into_bytes())),
-            },
-            otherwise => Err(otherwise),
-        }
-    }
-
-    pub fn expect_string(self) -> String {
-        self.try_string().unwrap_or_else(|otherwise| {
-            panic!(
-                "Unexpected target, required ToString but got {:?}",
-                otherwise
-            )
-        })
-    }
-
-    pub fn try_bytes(self) -> Result<Vec<u8>, Self> {
-        match self {
-            Target::ToString(s) => Ok(s.into_bytes()),
-            Target::ToBytes(bytes) => Ok(bytes),
-            otherwise => Err(otherwise),
-        }
-    }
-
-    pub fn expect_bytes(self) -> Vec<u8> {
-        self.try_bytes().unwrap_or_else(|otherwise| {
-            panic!(
-                "Unexpected target, required ToBytes or ToString but got {:?}",
-                otherwise
-            )
-        })
     }
 }
 
@@ -386,6 +510,12 @@ pub struct RequestError {
     pub target: Target,
 }
 
+impl RequestError {
+    pub fn into_io_error(self) -> io::Error {
+        io::Error::new(io::ErrorKind::Other, self.to_string())
+    }
+}
+
 #[derive(Debug)]
 pub enum InnerRequestError {
     SetLengthFailed {
@@ -404,6 +534,7 @@ pub enum InnerRequestError {
         length: usize,
         error: io::Error,
     },
+    ResultConversionFailed,
     CurlError(curl::Error),
     MultiError(Vec<InnerRequestError>),
 }
@@ -429,7 +560,7 @@ enum InnerTarget {
     },
     ToBytes(Vec<u8>),
     ToString(Vec<u8>),
-    ToWriter(Box<dyn Write + Send + Sync>),
+    ToWriter(Box<dyn Write>),
     #[cfg(feature = "memmap")]
     ToMMap {
         path: PathBuf,
@@ -444,7 +575,7 @@ pub struct MappedFile {
     len: usize,
 }
 
-impl DurlRequest {
+impl<T> DurlRequest<T> {
     pub fn new(
         url: &str,
         target: Target,
@@ -452,12 +583,17 @@ impl DurlRequest {
         verbose_fn: Option<Box<dyn VerboseHandler>>,
         progress_fn: Option<(Duration, u64, Box<dyn ProgressHandler>)>,
     ) -> io::Result<Self> {
-        let handle = DurlRequestHandler::new(url, target, speed_limit, verbose_fn, progress_fn)?;
-        Ok(DurlRequest(handle))
+        let handler = DurlRequestHandler::new(url, target, speed_limit, verbose_fn, progress_fn)?;
+        Ok(DurlRequest {
+            handler,
+            _output: PhantomData,
+        })
     }
+}
 
-    pub fn perform(self) -> DurlResult {
-        DurlRequestHandler::perform(self.0)
+impl<T: FromTarget> DurlRequest<T> {
+    pub fn perform(self) -> DurlResult<T> {
+        DurlRequestHandler::perform(self.handler)
     }
 }
 
@@ -535,7 +671,7 @@ impl DurlRequestHandler {
         Ok(handle)
     }
 
-    fn perform(mut handle: Easy2<Self>) -> DurlResult {
+    fn perform<T: FromTarget>(mut handle: Easy2<Self>) -> DurlResult<T> {
         if let Some(progress) = handle.get_mut().progress.as_mut() {
             progress.start = Instant::now();
         }
@@ -548,7 +684,7 @@ impl DurlRequestHandler {
         Self::finish_response(handle)
     }
 
-    pub(crate) fn finish_response(mut handle: Easy2<Self>) -> DurlResult {
+    pub(crate) fn finish_response<T: FromTarget>(mut handle: Easy2<Self>) -> DurlResult<T> {
         let target = mem::replace(&mut handle.get_mut().target, InnerTarget::Drop);
         let target = match target.into_target() {
             Ok(target) => target,
@@ -562,6 +698,11 @@ impl DurlRequestHandler {
             return Err(RequestError { error, target });
         }
 
+        let output = T::from_target(target).map_err(|target| RequestError {
+            error: InnerRequestError::ResultConversionFailed,
+            target,
+        })?;
+
         let timings = ResponseTimings {
             namelookup: handle.namelookup_time().unwrap_or_default(),
             connect: handle.connect_time().unwrap_or_default(),
@@ -572,7 +713,7 @@ impl DurlRequestHandler {
             total: handle.total_time().unwrap_or_default(),
         };
 
-        Ok(DurlResponse { target, timings })
+        Ok(DurlResponse { output, timings })
     }
 
     fn set_handle(&mut self, handle: *mut CURL) {
@@ -978,25 +1119,30 @@ impl Display for RequestError {
             err: &InnerRequestError,
         ) -> std::fmt::Result {
             match err {
-                InnerRequestError::SetLengthFailed { length, error } => f.write_fmt(format_args!(
+                InnerRequestError::SetLengthFailed { length, error } => write!(
+                    f,
                     "could not set the file size on [{}] to {} bytes: {}",
                     path, length, error
-                )),
-                InnerRequestError::FileWriteFailed { length, error } => f.write_fmt(format_args!(
+                ),
+                InnerRequestError::FileWriteFailed { length, error } => write!(
+                    f,
                     "could not write to [{}], num_bytes={}: {}",
                     path, length, error
-                )),
-                InnerRequestError::ResponseNotUtf8 { source } => f.write_fmt(format_args!(
-                    "could not decode the response as UTF-8: {}",
-                    source
-                )),
+                ),
+                InnerRequestError::ResponseNotUtf8 { source } => {
+                    write!(f, "could not decode the response as UTF-8: {}", source)
+                }
                 #[cfg(feature = "memmap")]
-                InnerRequestError::MemoryMapFailed { length, error } => f.write_fmt(format_args!(
+                InnerRequestError::MemoryMapFailed { length, error } => write!(
+                    f,
                     "could not memory-map [{}] for writing {} bytes: {}",
                     path, length, error
-                )),
+                ),
+                InnerRequestError::ResultConversionFailed => {
+                    write!(f, "Could not convert {} to the target result", path)
+                }
                 InnerRequestError::CurlError(error) => {
-                    f.write_fmt(format_args!("Underlying curl error: {}", error))
+                    write!(f, "Underlying curl error: {}", error)
                 }
                 InnerRequestError::MultiError(errors) => match &errors[..] {
                     [] => f.write_str("Empty errors"),
@@ -1027,6 +1173,7 @@ impl std::error::Error for RequestError {
                 InnerRequestError::ResponseNotUtf8 { source, .. } => Some(source),
                 #[cfg(feature = "memmap")]
                 InnerRequestError::MemoryMapFailed { error, .. } => Some(error),
+                InnerRequestError::ResultConversionFailed => None,
                 InnerRequestError::CurlError(error) => Some(error),
                 InnerRequestError::MultiError(errors) => errors.iter().find_map(get_source),
             }

@@ -7,8 +7,9 @@ mod selector;
 #[cfg(feature = "client")]
 pub use client::DurlClient;
 pub use request::{
-    DurlRequest, DurlRequestBuilder, DurlResponse, DurlResult, ProgressHandler, RequestError,
-    ResponseTimings, Target, VerboseHandler, VerboseMessage,
+    DropResponse, DurlRequest, DurlRequestBuilder, DurlResponse, DurlResult, FromTarget,
+    ProgressHandler, RequestError, ResponseTimings, Target, VerboseHandler, VerboseMessage,
+    WriteToBytes, WriteToFile, WriteToStdErr, WriteToStdOut, WriteToString, WriteToWriter,
 };
 
 pub type Result<A, E = Box<dyn std::error::Error>> = std::result::Result<A, E>;

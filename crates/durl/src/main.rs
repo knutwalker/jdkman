@@ -1,10 +1,10 @@
 use console::Style;
-use libdurl::{DurlRequestBuilder, DurlResult, Target, VerboseMessage};
+use libdurl::{DurlRequestBuilder, DurlResult, VerboseMessage};
 use libjdkman::{eprint_color, eprintln_red};
-use std::{error::Error, time::Duration};
+use std::{error::Error, fmt::Debug, path::PathBuf, time::Duration};
 use ubyte::ByteUnit;
 
-fn print_response(verbose: bool, print_to_stdout: bool, response: DurlResult) {
+fn print_response<T: Debug>(verbose: bool, print_to_stdout: bool, response: DurlResult<T>) {
     match response {
         Ok(response) => {
             if verbose {
@@ -74,17 +74,27 @@ fn run() -> Result<(), Box<dyn Error>> {
     let progress_flag = args.contains(["-p", "--progress"]);
     let limit: Option<ByteUnit> = args.opt_value_from_str(["-l", "--limit"])?;
 
-    let mut target = args.value_from_os_str(["-o", "--output"], |s| -> Result<_, String> {
+    enum OutputArg {
+        Stdout,
+        File(PathBuf, bool),
+    }
+
+    let mut output = args.value_from_os_str(["-o", "--output"], |s| -> Result<_, String> {
         if s == "-" {
-            Ok(Target::stdout())
+            Ok(OutputArg::Stdout)
         } else {
-            Ok(Target::file(s, false))
+            Ok(OutputArg::File(s.into(), false))
         }
     })?;
-    let target_is_stdout = matches!(target, Target::StdOut);
 
-    let force_flag = args.contains(["-f", "--force"]);
-    target.set_overwrite_if_exists(force_flag);
+    let target_is_stdout = match &mut output {
+        OutputArg::Stdout => true,
+        OutputArg::File(_, overwrite) => {
+            let force_flag = args.contains(["-f", "--force"]);
+            *overwrite = force_flag;
+            false
+        }
+    };
 
     let url: String = args.free_from_str()?;
 
@@ -130,12 +140,7 @@ For more information try --help
 
     if verbose_flag {
         request.verbose_fn(print_verbose);
-    }
-
-    let request = request.url(&url).target(target).build()?;
-
-    // print version line
-    if verbose_flag {
+        // print version line
         if target_is_stdout {
             libdurl::print_version(std::io::stderr());
         } else {
@@ -143,8 +148,20 @@ For more information try --help
         }
     }
 
-    let response = request.perform();
-    print_response(verbose_flag, !target_is_stdout, response);
+    let mut request = request.url(&url);
+
+    match output {
+        OutputArg::Stdout => print_response(
+            verbose_flag,
+            false,
+            request.write_to_stdout().build()?.perform(),
+        ),
+        OutputArg::File(file, overwrite) => print_response(
+            verbose_flag,
+            true,
+            request.write_to_file(overwrite, file).build()?.perform(),
+        ),
+    }
 
     Ok(())
 }
