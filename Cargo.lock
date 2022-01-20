@@ -166,9 +166,9 @@ checksum = "9049f8ff49f75b946f95557148e70230499c8a642bf2d6528246afc7d0282d17"
 
 [[package]]
 name = "libc"
-version = "0.2.103"
+version = "0.2.113"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd8f7255a17a627354f321ef0055d63b898c6fb27eff628af4d1b66b7331edf6"
+checksum = "eef78b64d87775463c549fbd80e19249ef436ea3bf1de2a1eb7e717ec7fab1e9"
 
 [[package]]
 name = "libdurl"
