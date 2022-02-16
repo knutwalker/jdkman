@@ -15,9 +15,9 @@ edition = "2018"
 resolver = "2"
 
 [dependencies]
-console = { version = "0.14", default-features = false }
+console = { version = "0.15.0", default-features = false }
 libjdkman = { path = "crates/libjdkman"}
-pico-args = { version = "0.4", features = [ "short-space-opt", "combined-flags" ] }
+pico-args = { version = "0.4.2", features = [ "short-space-opt", "combined-flags" ] }
 
 [profile.release]
 codegen-units = 1

@@ -13,8 +13,8 @@ resolver = "2"
 workspace = "../.."
 
 [dependencies]
-console = { version = "0.14", default-features = false }
+console = { version = "0.15.0", default-features = false }
 libdurl = { path = "../libdurl", features = [ "progress_bar" ]}
 libjdkman = { path = "../libjdkman"}
-pico-args = "0.4"
-ubyte = "0.10"
+pico-args = "0.4.2"
+ubyte = "0.10.1"
