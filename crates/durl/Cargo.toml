@@ -17,4 +17,4 @@ console = { version = "0.15.0", default-features = false }
 libdurl = { path = "../libdurl", features = [ "progress_bar" ]}
 libjdkman = { path = "../libjdkman"}
 pico-args = "0.4.2"
-ubyte = "0.10.1"
+ubyte = "0.10.3"
