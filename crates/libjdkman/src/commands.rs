@@ -458,10 +458,8 @@ mod install_command {
             return Err(InstallError::AlreadyInstalled(version.into()));
         }
 
-        if validate_version {
-            if !validate_command::run(candidates_api, platform, verbose, version)? {
-                return Err(InstallError::InvalidVersion(version.into()));
-            }
+        if validate_version && !validate_command::run(candidates_api, platform, verbose, version)? {
+            return Err(InstallError::InvalidVersion(version.into()));
         };
 
         Ok(candidates_path)
@@ -678,14 +676,12 @@ mod list_command {
         output.push_str(
             "--------------------------------------------------------------------------------\n",
         );
-        if candidates.is_empty() {
-            if crate::use_color() {
-                let _ = writeln!(
-                    &mut output,
-                    "   {}",
-                    console::style("None installed!").yellow()
-                );
-            }
+        if candidates.is_empty() && crate::use_color() {
+            let _ = writeln!(
+                &mut output,
+                "   {}",
+                console::style("None installed!").yellow()
+            );
         }
 
         for candidate in candidates {

@@ -43,7 +43,7 @@ pub fn candidates_dir() -> &'static Path {
     }
 
     static SDKMAN_CANDIDATES_DIR: OnceCell<PathBuf> = OnceCell::new();
-    SDKMAN_CANDIDATES_DIR.get_or_init(|| find())
+    SDKMAN_CANDIDATES_DIR.get_or_init(find)
 }
 
 pub fn archives_dir() -> &'static Path {

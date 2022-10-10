@@ -1,5 +1,5 @@
 [workspace]
-members = [ "crates/libjdkman", "crates/libdurl", "crates/durl" ]
+members = ["crates/libjdkman", "crates/libdurl", "crates/durl"]
 
 [package]
 name = "jdkman"
@@ -15,9 +15,13 @@ edition = "2018"
 resolver = "2"
 
 [dependencies]
-console = { version = "0.15.0", default-features = false }
-libjdkman = { path = "crates/libjdkman"}
-pico-args = { version = "0.4.2", features = [ "short-space-opt", "combined-flags" ] }
+console = { version = "0.15.2", default-features = false }
+libjdkman = { path = "crates/libjdkman" }
+pico-args = { version = "0.5.0", features = [
+    "short-space-opt",
+    "combined-flags",
+    "eq-separator",
+] }
 
 [profile.release]
 codegen-units = 1

@@ -1276,6 +1276,7 @@ mod progress_bar {
                 pb.set_style(
                     ProgressStyle::default_bar()
                         .template(DEFAULT_TEMPLATE)
+                        .unwrap()
                         .progress_chars(DEFAULT_PROGRESS),
                 );
                 pb

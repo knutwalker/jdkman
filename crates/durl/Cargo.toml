@@ -13,8 +13,8 @@ resolver = "2"
 workspace = "../.."
 
 [dependencies]
-console = { version = "0.15.0", default-features = false }
-libdurl = { path = "../libdurl", features = [ "progress_bar" ]}
-libjdkman = { path = "../libjdkman"}
-pico-args = "0.4.2"
-ubyte = "0.10.1"
+console = { version = "0.15.2", default-features = false }
+libdurl = { path = "../libdurl", features = ["progress_bar"] }
+libjdkman = { path = "../libjdkman" }
+pico-args = { version = "0.5.0", features = ["eq-separator"] }
+ubyte = "0.10.3"

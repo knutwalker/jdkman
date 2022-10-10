@@ -82,8 +82,6 @@ impl<'a, T: Display> SelectOptions<'a, T> {
 }
 
 pub(crate) fn fzf_select<T: Display>(options: SelectOptions<T>) -> io::Result<Selection<T>> {
-    use std::array::IntoIter as A;
-
     const DELIMITER: &str = "\x1F";
 
     let mut fzf_command = Command::new(fzf_command());
@@ -92,31 +90,31 @@ pub(crate) fn fzf_select<T: Display>(options: SelectOptions<T>) -> io::Result<Se
         .envs(sh_path())
         .arg("--exact")
         .arg("-i")
-        .args(A::new(["--with-nth", "2"]))
-        .args(A::new(["--delimiter", DELIMITER]))
+        .args(["--with-nth", "2"])
+        .args(["--delimiter", DELIMITER])
         .arg("--no-sort")
-        .args(options.tac.then(|| "--tac"))
-        .args(A::new(["--bind", "enter:accept-non-empty"]))
-        .args(A::new(["--bind", "double-click:accept-non-empty"]))
-        .args(A::new(["--bind", "esc:cancel"]))
-        .args(A::new(["--prompt", " "]))
-        .args(crate::use_color().then(|| "--ansi"))
+        .args(options.tac.then_some("--tac"))
+        .args(["--bind", "enter:accept-non-empty"])
+        .args(["--bind", "double-click:accept-non-empty"])
+        .args(["--bind", "esc:cancel"])
+        .args(["--prompt", " "])
+        .args(crate::use_color().then_some("--ansi"))
         .arg("--no-bold")
         .args(options.preview.into_iter().flat_map(|p| {
-            A::new([
+            [
                 "--preview",
                 p,
                 "--preview-window",
                 "right:sharp:hidden",
                 "--bind",
                 "?:toggle-preview",
-            ])
+            ]
         }))
         .args(
             options
                 .query
                 .into_iter()
-                .flat_map(|q| A::new([OsStr::new("--query"), q])),
+                .flat_map(|q| [OsStr::new("--query"), q]),
         )
         .arg("--select-1")
         .arg("--exit-0")
