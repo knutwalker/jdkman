@@ -22,4 +22,4 @@ lenient_semver_parser = { version = "0.4.2", default-features = false, features 
 ] }
 libc = "0.2.137"
 libdurl = { path = "../libdurl", features = ["progress_bar"] }
-once_cell = "1.15.0"
+once_cell = "1.16.0"
