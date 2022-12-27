@@ -16,7 +16,7 @@ workspace = "../.."
 bstr = { version = "1.0.1", default-features = false, features = ["std"] }
 cfg-if = "1.0.0"
 clicolors-control = "1.0.1"
-console = { version = "0.15.2", default-features = false }
+console = { version = "0.15.3", default-features = false }
 lenient_semver_parser = { version = "0.4.2", default-features = false, features = [
     "partial",
 ] }
