@@ -13,7 +13,7 @@ resolver = "2"
 workspace = "../.."
 
 [dependencies]
-console = { version = "0.15.2", default-features = false }
+console = { version = "0.15.4", default-features = false }
 libdurl = { path = "../libdurl", features = ["progress_bar"] }
 libjdkman = { path = "../libjdkman" }
 pico-args = { version = "0.5.0", features = ["eq-separator"] }
