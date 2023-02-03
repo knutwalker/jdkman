@@ -3,7 +3,7 @@ members = ["crates/libjdkman", "crates/libdurl", "crates/durl"]
 
 [package]
 name = "jdkman"
-version = "0.2.0"
+version = "0.2.1"
 description = "Personalised sdkman frontend specialized for Java"
 authors = ["Paul Horn <developer@knutwalker.de>"]
 license = "MIT OR Apache-2.0"
