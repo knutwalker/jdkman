@@ -1,12 +1,11 @@
-
 [package]
 name = "jdkman"
 version = "0.5.0"
 description = "Personalised sdkman frontend specialized for Java"
 authors = ["Paul Horn <developer@knutwalker.de>"]
 license = "MIT OR Apache-2.0"
-homepage = "https://github.com/knutwalker/jdkman/"
-repository = "https://github.com/knutwalker/jdkman/"
+homepage = "https://github.com/knutwalker/jdkman"
+repository = "https://github.com/knutwalker/jdkman"
 categories = ["command-line-utilities"]
 keywords = ["sdkman", "jdk", "java"]
 edition = "2018"
