@@ -128,7 +128,7 @@ pub fn platform() -> &'static str {
 
     #[cfg(not(unix))]
     fn unmae_s() -> io::Result<String> {
-        Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
+        Err(crate::io_err("Not implemented"))
     }
 
     fn infer_platform() -> String {

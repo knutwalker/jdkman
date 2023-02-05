@@ -344,26 +344,25 @@ mod validate_command {
         match valid.trim() {
             "valid" => Ok(true),
             "invalid" => Ok(false),
-            otherwise => Err(io::Error::new(io::ErrorKind::Other, format!("Unexpected validation response, expected either 'valid' or 'invalid', but got {otherwise}")))
+            otherwise => {
+                let err_msg = format!("Unexpected validation response, expected either 'valid' or 'invalid', but got {otherwise}");
+                Err(crate::io_err(&err_msg))
+            }
         }
     }
 }
 
 mod install_command {
     use super::{default_command, validate_command};
-    use crate::{
-        durl::{DurlRequestBuilder, RequestError},
-        eprintln_color,
-        prelude::Candidate,
-    };
+    use crate::{eprintln_color, prelude::Candidate};
     use bstr::ByteSlice;
     use console::Style;
     use std::{
-        fs,
-        io::{self, ErrorKind},
+        fs::{self, OpenOptions},
+        io::{self, BufWriter, ErrorKind},
         path::{Path, PathBuf},
         process::{Command, Stdio},
-        time::Duration,
+        time::Instant,
     };
 
     pub type InstallResult = Result<Candidate, InstallError>;
@@ -372,7 +371,7 @@ mod install_command {
         AlreadyInstalled(String),
         InvalidVersion(String),
         ArchiveCorrupt(String, PathBuf),
-        DownloadError(RequestError),
+        DownloadError(reqwest::Error),
         Other(io::Error),
     }
 
@@ -381,8 +380,8 @@ mod install_command {
             Self::Other(val)
         }
     }
-    impl From<RequestError> for InstallError {
-        fn from(val: RequestError) -> Self {
+    impl From<reqwest::Error> for InstallError {
+        fn from(val: reqwest::Error) -> Self {
             Self::DownloadError(val)
         }
     }
@@ -474,18 +473,27 @@ mod install_command {
 
         let binary_input = temp_dir.join(format!("java-{version}.bin"));
 
-        let response = DurlRequestBuilder::new()
-            .progress_bar()
-            .progress_min_download(100_u64 << 10) // 100 KiB
-            .progress_interval(Duration::from_millis(50)) // 20 fps
-            .verbose_fn_if(verbose, super::shared::print_verbose)
-            .url(&url)
-            .write_to_file(true, &binary_input)
-            .build()?
-            .perform()?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&binary_input)?;
+
+        // TODO: indicatif progressbar every 100K every 50ms/20fps
+        // TODO: .verbose_fn_if(verbose, super::shared::print_verbose)
+
+        let start = Instant::now();
+        let mut response = reqwest::blocking::get(&url)?;
+
+        if let Some(size) = response.content_length() {
+            file.set_len(size)?;
+        }
+
+        let mut wtr = BufWriter::new(file);
+        let bytes = response.copy_to(&mut wtr)?;
 
         if verbose {
-            eprintln_color!(@Style::new().for_stderr().dim(), "Downloaded binary to {} in {:?}", binary_input.display(), response.timings.total);
+            let took = start.elapsed();
+            eprintln_color!(@Style::new().for_stderr().dim(), "Downloaded {} bytes of binaryto {} in {:?}", bytes, binary_input.display(), took);
         }
 
         let zip_output = post_install(
@@ -722,13 +730,12 @@ mod list_command {
 }
 
 mod shared {
-    use crate::durl::{DurlRequestBuilder, VerboseMessage};
+
+    use crate::io_err;
     use crate::{
-        eprint_color, eprintln_color,
         prelude::Candidate,
         select::{SelectOptions, Selection},
     };
-    use console::Style;
     use std::{
         ffi::OsStr,
         fs::{self, DirEntry},
@@ -736,34 +743,44 @@ mod shared {
         path::Path,
     };
 
-    pub(super) fn request(url: String, verbose: bool) -> io::Result<String> {
-        let response = DurlRequestBuilder::new()
-            .verbose_fn_if(verbose, print_verbose)
-            .url(&url)
-            .return_as_string()
-            .build()?
-            .perform()
-            .map_err(|e| e.into_io_error())?;
+    pub(super) fn request(url: String, _verbose: bool) -> io::Result<String> {
+        static APP_USER_AGENT: &str =
+            concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+        // TODO: .verbose_fn_if(verbose, print_verbose)
 
-        if verbose {
-            eprintln_color!(@Style::new().for_stderr().dim(), "{:#?}", response.timings);
-        }
+        let response = reqwest::blocking::Client::builder()
+            .user_agent(APP_USER_AGENT)
+            .connection_verbose(_verbose)
+            .build()
+            .map_err(io_err)?
+            .get(&url)
+            .send()
+            .map_err(io_err)?
+            .error_for_status()
+            .map_err(io_err)?
+            .text()
+            .map_err(io_err)?;
 
-        Ok(response.output)
+        // TODO:
+        // if verbose {
+        //     eprintln_color!(@Style::new().for_stderr().dim(), "{:#?}", response.timings);
+        // }
+
+        Ok(response)
     }
 
-    pub(super) fn print_verbose(msg: VerboseMessage, data: &[u8]) {
-        let style = match msg {
-            VerboseMessage::Text => Style::new().for_stderr().dim(),
-            VerboseMessage::OutgoingHeader => Style::new().for_stderr().dim().magenta(),
-            VerboseMessage::FirstIncomingHeader => Style::new().for_stderr().green(),
-            VerboseMessage::IncomingHeader => Style::new().for_stderr().cyan(),
-        };
-        match std::str::from_utf8(data) {
-            Ok(s) => eprint_color!(@style, "{}", s),
-            Err(_) => eprint_color!(@style.red(), "({} bytes of data)", data.len()),
-        }
-    }
+    // pub(super) fn print_verbose(msg: VerboseMessage, data: &[u8]) {
+    //     let style = match msg {
+    //         VerboseMessage::Text => Style::new().for_stderr().dim(),
+    //         VerboseMessage::OutgoingHeader => Style::new().for_stderr().dim().magenta(),
+    //         VerboseMessage::FirstIncomingHeader => Style::new().for_stderr().green(),
+    //         VerboseMessage::IncomingHeader => Style::new().for_stderr().cyan(),
+    //     };
+    //     match std::str::from_utf8(data) {
+    //         Ok(s) => eprint_color!(@style, "{}", s),
+    //         Err(_) => eprint_color!(@style.red(), "({} bytes of data)", data.len()),
+    //     }
+    // }
 
     pub(super) fn list_candidates(candidates_dir: &Path) -> io::Result<Vec<Candidate>> {
         let mut candidates = fs::read_dir(candidates_dir)?

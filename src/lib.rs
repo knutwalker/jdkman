@@ -1,8 +1,9 @@
+use std::io;
+
 use once_cell::sync::OnceCell;
 
 mod candidate;
 mod commands;
-mod durl;
 mod sdkman;
 mod select;
 
@@ -37,6 +38,10 @@ pub fn use_color() -> bool {
 
     static SDKMAN_COLOR_ENABLED: OnceCell<bool> = OnceCell::new();
     *SDKMAN_COLOR_ENABLED.get_or_init(check_for_colors)
+}
+
+fn io_err<E: ToString>(err: E) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, err.to_string())
 }
 
 #[macro_export]
