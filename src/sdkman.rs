@@ -110,6 +110,7 @@ pub fn platform() -> &'static str {
         }
     }
 
+    #[cfg(unix)]
     fn unmae_s() -> io::Result<String> {
         let mut uname = MaybeUninit::zeroed();
 
@@ -123,6 +124,11 @@ pub fn platform() -> &'static str {
         let sysname = sysname.to_string_lossy().to_ascii_lowercase();
         // let sysname = Box::leak(sysname.into_boxed_str());
         Ok(sysname)
+    }
+
+    #[cfg(not(unix))]
+    fn unmae_s() -> io::Result<String> {
+        Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
     }
 
     fn infer_platform() -> String {
