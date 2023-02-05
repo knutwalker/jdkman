@@ -13,7 +13,7 @@ edition = "2018"
 resolver = "2"
 
 [dependencies]
-bstr = { version = "1.0.1", default-features = false, features = ["std"] }
+bstr = { version = "1.2.0", default-features = false, features = ["std"] }
 cfg-if = "1.0.0"
 clicolors-control = "1.0.1"
 console = { version = "0.15.2", default-features = false }
