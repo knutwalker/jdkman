@@ -1,11 +1,5 @@
-#[cfg(feature = "client")]
-mod client;
 mod request;
-#[cfg(feature = "client")]
-mod selector;
 
-#[cfg(feature = "client")]
-pub use client::DurlClient;
 pub use request::{
     DropResponse, DurlRequest, DurlRequestBuilder, DurlResponse, DurlResult, FromTarget,
     ProgressHandler, RequestError, ResponseTimings, Target, VerboseHandler, VerboseMessage,

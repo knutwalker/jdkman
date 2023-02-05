@@ -359,10 +359,13 @@ mod validate_command {
 
 mod install_command {
     use super::{default_command, validate_command};
-    use crate::{eprintln_color, prelude::Candidate};
+    use crate::{
+        durl::{DurlRequestBuilder, RequestError},
+        eprintln_color,
+        prelude::Candidate,
+    };
     use bstr::ByteSlice;
     use console::Style;
-    use libdurl::DurlRequestBuilder;
     use std::{
         fs,
         io::{self, ErrorKind},
@@ -377,7 +380,7 @@ mod install_command {
         AlreadyInstalled(String),
         InvalidVersion(String),
         ArchiveCorrupt(String, PathBuf),
-        DownloadError(libdurl::RequestError),
+        DownloadError(RequestError),
         Other(io::Error),
     }
 
@@ -386,8 +389,8 @@ mod install_command {
             Self::Other(val)
         }
     }
-    impl From<libdurl::RequestError> for InstallError {
-        fn from(val: libdurl::RequestError) -> Self {
+    impl From<RequestError> for InstallError {
+        fn from(val: RequestError) -> Self {
             Self::DownloadError(val)
         }
     }
@@ -732,13 +735,13 @@ mod list_command {
 }
 
 mod shared {
+    use crate::durl::{DurlRequestBuilder, VerboseMessage};
     use crate::{
         eprint_color, eprintln_color,
         prelude::Candidate,
         select::{SelectOptions, Selection},
     };
     use console::Style;
-    use libdurl::{DurlRequestBuilder, VerboseMessage};
     use std::{
         ffi::OsStr,
         fs::{self, DirEntry},

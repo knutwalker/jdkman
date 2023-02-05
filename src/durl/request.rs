@@ -1,9 +1,7 @@
-use crate::Result;
+use super::Result;
 use curl::easy::{Auth, Easy2, Handler, InfoType};
 use curl_sys::CURL;
 use libc::c_double;
-#[cfg(feature = "memmap")]
-use memmap::MmapMut;
 use std::{
     fmt::{Debug, Display},
     fs::{File, OpenOptions},
@@ -88,7 +86,6 @@ impl<T, S> DurlRequestBuilder<'_, T, S> {
         self
     }
 
-    #[cfg(feature = "progress_bar")]
     pub fn progress_bar(&mut self) -> &mut Self {
         self.progress_fn = Some(Box::new(progress_bar::DurlProgress::new()));
         self
@@ -142,15 +139,6 @@ impl<'url> DurlRequestBuilder<'url, (), OutputStage> {
         output: impl Into<PathBuf>,
     ) -> DurlRequestBuilder<'url, PathBuf, BuildStage> {
         self.target(Target::file(output, overwrite_if_exists))
-    }
-
-    #[cfg(feature = "memmap")]
-    pub fn write_to_memory_mapped_file(
-        &mut self,
-        overwrite_if_exists: bool,
-        output: impl Into<PathBuf>,
-    ) -> DurlRequestBuilder<'url, PathBuf, BuildStage> {
-        self.target(Target::memory_mapped_file(output, overwrite_if_exists))
     }
 
     pub fn write_to_stdout(&mut self) -> DurlRequestBuilder<'url, (), BuildStage> {
@@ -265,8 +253,6 @@ pub struct WriteToStdErr;
 pub struct WriteToFile {
     path: PathBuf,
     overwrite_if_exists: bool,
-    #[cfg(feature = "memmap")]
-    use_mmap: bool,
 }
 
 pub struct WriteToBytes(Vec<u8>);
@@ -304,8 +290,6 @@ impl ToTarget for WriteToFile {
         Target::ToFile {
             path: self.path,
             overwrite_if_exists: self.overwrite_if_exists,
-            #[cfg(feature = "memmap")]
-            use_mmap: self.use_mmap,
         }
     }
 }
@@ -401,8 +385,6 @@ pub enum Target {
     ToFile {
         path: PathBuf,
         overwrite_if_exists: bool,
-        #[cfg(feature = "memmap")]
-        use_mmap: bool,
     },
     ToBytes(Vec<u8>),
     ToString(String),
@@ -430,17 +412,6 @@ impl Target {
         WriteToFile {
             path: path.into(),
             overwrite_if_exists,
-            #[cfg(feature = "memmap")]
-            use_mmap: false,
-        }
-    }
-
-    #[cfg(feature = "memmap")]
-    pub fn memory_mapped_file(path: impl Into<PathBuf>, overwrite_if_exists: bool) -> WriteToFile {
-        WriteToFile {
-            path: path.into(),
-            overwrite_if_exists,
-            use_mmap: true,
         }
     }
 
@@ -518,22 +489,9 @@ impl RequestError {
 
 #[derive(Debug)]
 pub enum InnerRequestError {
-    SetLengthFailed {
-        length: usize,
-        error: io::Error,
-    },
-    FileWriteFailed {
-        length: usize,
-        error: io::Error,
-    },
-    ResponseNotUtf8 {
-        source: std::str::Utf8Error,
-    },
-    #[cfg(feature = "memmap")]
-    MemoryMapFailed {
-        length: usize,
-        error: io::Error,
-    },
+    SetLengthFailed { length: usize, error: io::Error },
+    FileWriteFailed { length: usize, error: io::Error },
+    ResponseNotUtf8 { source: std::str::Utf8Error },
     ResultConversionFailed,
     CurlError(curl::Error),
     MultiError(Vec<InnerRequestError>),
@@ -552,27 +510,10 @@ enum InnerTarget {
     Drop,
     StdOut,
     StdErr,
-    ToFile {
-        path: PathBuf,
-        file: File,
-        #[cfg(feature = "memmap")]
-        use_mmap: bool,
-    },
+    ToFile { path: PathBuf, file: File },
     ToBytes(Vec<u8>),
     ToString(Vec<u8>),
     ToWriter(Box<dyn Write>),
-    #[cfg(feature = "memmap")]
-    ToMMap {
-        path: PathBuf,
-        map: MappedFile,
-    },
-}
-
-#[cfg(feature = "memmap")]
-pub struct MappedFile {
-    map: MmapMut,
-    offset: usize,
-    len: usize,
 }
 
 impl<T> DurlRequest<T> {
@@ -819,8 +760,6 @@ impl Target {
             Target::ToFile {
                 path,
                 overwrite_if_exists,
-                #[cfg(feature = "memmap")]
-                use_mmap,
             } => {
                 let mut options = OpenOptions::new();
                 options.read(true).write(true);
@@ -832,12 +771,7 @@ impl Target {
                 };
 
                 let file = options.open(&path)?;
-                InnerTarget::ToFile {
-                    path,
-                    file,
-                    #[cfg(feature = "memmap")]
-                    use_mmap,
-                }
+                InnerTarget::ToFile { path, file }
             }
             Target::ToBytes(bytes) => InnerTarget::ToBytes(bytes),
             Target::ToString(s) => InnerTarget::ToString(s.into()),
@@ -851,28 +785,9 @@ impl Target {
 impl InnerTarget {
     fn open(&mut self, length: usize) -> Result<(), Option<InnerRequestError>> {
         match self {
-            InnerTarget::ToFile {
-                path: _path,
-                file,
-                #[cfg(feature = "memmap")]
-                use_mmap,
-            } => {
+            InnerTarget::ToFile { path: _path, file } => {
                 if let Err(error) = file.set_len(length as u64) {
                     return Err(Some(InnerRequestError::SetLengthFailed { length, error }));
-                }
-
-                #[cfg(feature = "memmap")]
-                if *use_mmap {
-                    let map = match MappedFile::new(file, length) {
-                        Ok(output) => output,
-                        Err(error) => {
-                            return Err(Some(InnerRequestError::MemoryMapFailed { length, error }));
-                        }
-                    };
-                    *self = InnerTarget::ToMMap {
-                        path: mem::take(_path),
-                        map,
-                    };
                 }
             }
             InnerTarget::ToBytes(b) | InnerTarget::ToString(b) => {
@@ -890,8 +805,6 @@ impl InnerTarget {
             InnerTarget::StdOut => Self::write_to_write(data, std::io::stdout().lock()),
             InnerTarget::StdErr => Self::write_to_write(data, std::io::stderr().lock()),
             InnerTarget::ToFile { file, .. } => Self::write_to_write(data, file),
-            #[cfg(feature = "memmap")]
-            InnerTarget::ToMMap { map, .. } => Ok(map.write(data)),
             InnerTarget::ToBytes(b) | InnerTarget::ToString(b) => {
                 b.extend_from_slice(data);
                 Ok(data.len())
@@ -918,16 +831,9 @@ impl InnerTarget {
             InnerTarget::Drop => Target::Drop,
             InnerTarget::StdOut => Target::StdOut,
             InnerTarget::StdErr => Target::StdErr,
-            InnerTarget::ToFile {
-                path,
-                file: _,
-                #[cfg(feature = "memmap")]
-                use_mmap,
-            } => Target::ToFile {
+            InnerTarget::ToFile { path, file: _ } => Target::ToFile {
                 path,
                 overwrite_if_exists: false,
-                #[cfg(feature = "memmap")]
-                use_mmap,
             },
             InnerTarget::ToBytes(b) => Target::ToBytes(b),
             InnerTarget::ToString(b) => match String::from_utf8(b) {
@@ -941,40 +847,8 @@ impl InnerTarget {
                 }
             },
             InnerTarget::ToWriter(w) => Target::ToWriter(w),
-            #[cfg(feature = "memmap")]
-            InnerTarget::ToMMap { path, .. } => Target::ToFile {
-                path,
-                overwrite_if_exists: false,
-                use_mmap: true,
-            },
         };
         Ok(target)
-    }
-}
-
-#[cfg(feature = "memmap")]
-impl MappedFile {
-    fn new(file: &File, len: usize) -> io::Result<Self> {
-        Ok(MappedFile {
-            map: unsafe { MmapMut::map_mut(file) }?,
-            offset: 0,
-            len,
-        })
-    }
-
-    fn write(&mut self, mut data: &[u8]) -> usize {
-        let start = self.offset;
-        let mut end = start + data.len();
-
-        if end > self.len {
-            end = self.len;
-            data = &data[..(end - start)];
-        }
-
-        (&mut self.map[start..end]).copy_from_slice(data);
-        // self.map.flush_async_range(start, data.len())?;
-        self.offset = end;
-        data.len()
     }
 }
 
@@ -1132,12 +1006,6 @@ impl Display for RequestError {
                 InnerRequestError::ResponseNotUtf8 { source } => {
                     write!(f, "could not decode the response as UTF-8: {}", source)
                 }
-                #[cfg(feature = "memmap")]
-                InnerRequestError::MemoryMapFailed { length, error } => write!(
-                    f,
-                    "could not memory-map [{}] for writing {} bytes: {}",
-                    path, length, error
-                ),
                 InnerRequestError::ResultConversionFailed => {
                     write!(f, "Could not convert {} to the target result", path)
                 }
@@ -1171,8 +1039,6 @@ impl std::error::Error for RequestError {
                 InnerRequestError::SetLengthFailed { error, .. } => Some(error),
                 InnerRequestError::FileWriteFailed { error, .. } => Some(error),
                 InnerRequestError::ResponseNotUtf8 { source, .. } => Some(source),
-                #[cfg(feature = "memmap")]
-                InnerRequestError::MemoryMapFailed { error, .. } => Some(error),
                 InnerRequestError::ResultConversionFailed => None,
                 InnerRequestError::CurlError(error) => Some(error),
                 InnerRequestError::MultiError(errors) => errors.iter().find_map(get_source),
@@ -1251,7 +1117,6 @@ impl std::fmt::Debug for Target {
     }
 }
 
-#[cfg(feature = "progress_bar")]
 mod progress_bar {
     use indicatif::{ProgressBar, ProgressStyle};
     use std::time::Duration;

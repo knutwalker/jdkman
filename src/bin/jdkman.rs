@@ -3,7 +3,7 @@ use std::{
     fmt::Display,
 };
 
-use libjdkman::prelude::*;
+use jdkman::prelude::*;
 use pico_args::Arguments;
 
 type Result<A> = std::result::Result<A, Box<dyn std::error::Error + 'static>>;
@@ -23,7 +23,7 @@ macro_rules! help {
             "default [QUERY]",
             "Change the default version for all future shells.\nThis command requires `fzf` to be installed!\n\n",
             include_str!("help_default.txt"),
-            fzf_bin = ::libjdkman::fzf_command().to_string_lossy()
+            fzf_bin = ::jdkman::fzf_command().to_string_lossy()
         );
     };
 
@@ -51,7 +51,7 @@ macro_rules! help {
             "[use] [QUERY]",
             "Select the version to use in this shell session.\nThis command requires `fzf` to be installed!\n\n",
             include_str!("help_use.txt"),
-            fzf_bin = ::libjdkman::fzf_command().to_string_lossy()
+            fzf_bin = ::jdkman::fzf_command().to_string_lossy()
         );
     };
 

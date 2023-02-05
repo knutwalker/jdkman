@@ -2,6 +2,7 @@ use once_cell::sync::OnceCell;
 
 mod candidate;
 mod commands;
+mod durl;
 mod sdkman;
 mod select;
 
