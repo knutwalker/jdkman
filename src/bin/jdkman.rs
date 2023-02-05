@@ -246,6 +246,7 @@ pub(crate) fn run() -> Result<()> {
                 }
             }
         }
+        #[cfg(debug_assertions)]
         Some("install" | "i" | "in") => {
             help!("install", wants_help);
             let set_default = args.contains(["-d", "--set-default"]);
