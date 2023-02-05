@@ -16,7 +16,7 @@ resolver = "2"
 bstr = { version = "1.0.1", default-features = false, features = ["std"] }
 cfg-if = "1.0.0"
 clicolors-control = "1.0.1"
-console = { version = "0.15.2", default-features = false }
+console = { version = "0.15.5", default-features = false }
 curl-sys = "0.4.56"
 indicatif = "0.17.1"
 lenient_semver_parser = { version = "0.4.2", default-features = false, features = [ "partial", ] }
