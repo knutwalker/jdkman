@@ -11,6 +11,7 @@ categories = ["command-line-utilities"]
 keywords = ["sdkman", "jdk", "java"]
 edition = "2018"
 resolver = "2"
+rust-version = "1.62.1"
 
 [dependencies]
 bstr = { version = "1.2.0", default-features = false, features = ["std"] }
