@@ -124,7 +124,7 @@ pub(crate) fn fzf_select<T: Display>(options: SelectOptions<T>) -> io::Result<Se
         .stderr(Stdio::inherit());
 
     if options.verbose {
-        eprintln!("Calling fzf with the command: {:?}", fzf_command);
+        eprintln!("Calling fzf with the command: {fzf_command:?}");
     }
 
     let mut child = fzf_command.spawn()?;
@@ -145,13 +145,7 @@ pub(crate) fn fzf_select<T: Display>(options: SelectOptions<T>) -> io::Result<Se
         } else {
             console::style(item)
         };
-        writeln!(
-            stdin,
-            "{index}{delimiter}{item}",
-            index = index,
-            delimiter = DELIMITER,
-            item = item,
-        )?;
+        writeln!(stdin, "{index}{DELIMITER}{item}",)?;
     }
 
     drop(stdin);
@@ -160,7 +154,7 @@ pub(crate) fn fzf_select<T: Display>(options: SelectOptions<T>) -> io::Result<Se
     let status = output.status;
 
     if options.verbose {
-        eprintln!("fzf returned with {:?}", status);
+        eprintln!("fzf returned with {status:?}");
     }
 
     // EXIT STATUS
@@ -185,7 +179,7 @@ pub(crate) fn fzf_select<T: Display>(options: SelectOptions<T>) -> io::Result<Se
         otherwise => {
             let output = String::from_utf8(output.stderr).expect("non utf8 stderr");
             let ec = otherwise.unwrap_or(-1);
-            println!("Non-zero exit-code: {}: {}", ec, output);
+            println!("Non-zero exit-code: {ec}: {output}");
             std::process::exit(ec)
         }
     }

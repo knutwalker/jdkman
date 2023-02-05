@@ -47,25 +47,6 @@ pub struct DurlRequestBuilder<'url, T, Stage> {
 }
 
 impl<T, S> DurlRequestBuilder<'_, T, S> {
-    /// bytes per second, 0 = disable
-    pub fn limit_speed(&mut self, bytes_per_second: u64) -> &mut Self {
-        self.speed_limit = NonZeroU64::new(bytes_per_second);
-        self
-    }
-
-    pub fn verbose(&mut self, verbose: impl VerboseHandler + 'static) -> &mut Self {
-        self.verbose_fn = Some(Box::new(verbose));
-        self
-    }
-
-    pub fn verbose_fn(
-        &mut self,
-        verbose: impl FnMut(VerboseMessage, &[u8]) + 'static,
-    ) -> &mut Self {
-        self.verbose_fn = Some(Box::new(VerboseHandlerFromFn(verbose)));
-        self
-    }
-
     pub fn verbose_fn_if(
         &mut self,
         verbose_flag: bool,
@@ -73,16 +54,6 @@ impl<T, S> DurlRequestBuilder<'_, T, S> {
     ) -> &mut Self {
         self.verbose_fn = verbose_flag
             .then(move || -> Box<dyn VerboseHandler> { Box::new(VerboseHandlerFromFn(verbose)) });
-        self
-    }
-
-    pub fn progress(&mut self, progress: impl ProgressHandler + 'static) -> &mut Self {
-        self.progress_fn = Some(Box::new(progress));
-        self
-    }
-
-    pub fn progress_fn(&mut self, progress: impl FnMut(u64, u64, Duration) + 'static) -> &mut Self {
-        self.progress_fn = Some(Box::new(ProgressHandlerFromFn(progress)));
         self
     }
 
@@ -141,41 +112,8 @@ impl<'url> DurlRequestBuilder<'url, (), OutputStage> {
         self.target(Target::file(output, overwrite_if_exists))
     }
 
-    pub fn write_to_stdout(&mut self) -> DurlRequestBuilder<'url, (), BuildStage> {
-        self.target(Target::stdout())
-    }
-
-    pub fn write_to_sterr(&mut self) -> DurlRequestBuilder<'url, (), BuildStage> {
-        self.target(Target::stderr())
-    }
-
-    pub fn return_as_bytes(&mut self) -> DurlRequestBuilder<'url, Vec<u8>, BuildStage> {
-        self.append_to_bytes(Vec::new())
-    }
-
-    pub fn return_as_bytes_with_capacity(
-        &mut self,
-        capacity: usize,
-    ) -> DurlRequestBuilder<'url, Vec<u8>, BuildStage> {
-        self.append_to_bytes(Vec::with_capacity(capacity))
-    }
-
-    pub fn append_to_bytes(
-        &mut self,
-        bytes: Vec<u8>,
-    ) -> DurlRequestBuilder<'url, Vec<u8>, BuildStage> {
-        self.target(WriteToBytes(bytes))
-    }
-
     pub fn return_as_string(&mut self) -> DurlRequestBuilder<'url, String, BuildStage> {
         self.append_to_string(String::new())
-    }
-
-    pub fn return_as_string_with_capacity(
-        &mut self,
-        capacity: usize,
-    ) -> DurlRequestBuilder<'url, String, BuildStage> {
-        self.append_to_string(String::with_capacity(capacity))
     }
 
     pub fn append_to_string(
@@ -183,20 +121,6 @@ impl<'url> DurlRequestBuilder<'url, (), OutputStage> {
         string: String,
     ) -> DurlRequestBuilder<'url, String, BuildStage> {
         self.target(WriteToString(string))
-    }
-
-    pub fn write_to_writer(
-        &mut self,
-        writer: impl Write + 'static,
-    ) -> DurlRequestBuilder<'url, (), BuildStage> {
-        self.target(WriteToWriter(Box::new(writer)))
-    }
-
-    pub fn write_to_boxed_writer(
-        &mut self,
-        writer: impl Into<Box<dyn Write>>,
-    ) -> DurlRequestBuilder<'url, (), BuildStage> {
-        self.target(WriteToWriter(writer.into()))
     }
 
     pub fn target<T: ToTarget>(
@@ -676,7 +600,6 @@ impl DurlRequestHandler {
             };
 
             if rc == curl_sys::CURLE_OK {
-                let p = p as f64;
                 // we interpret a 0 size as error
                 if f64::is_finite(p) && p >= 1.0 && p <= (usize::MAX as f64) {
                     let p = unsafe {
@@ -692,10 +615,7 @@ impl DurlRequestHandler {
                 }
             } else {
                 let err = curl::Error::new(rc);
-                eprint!(
-                    "Encountered error while reading the content-length: {}",
-                    err
-                );
+                eprint!("Encountered error while reading the content-length: {err}");
             }
         }
         self.content_length
@@ -995,22 +915,20 @@ impl Display for RequestError {
             match err {
                 InnerRequestError::SetLengthFailed { length, error } => write!(
                     f,
-                    "could not set the file size on [{}] to {} bytes: {}",
-                    path, length, error
+                    "could not set the file size on [{path}] to {length} bytes: {error}"
                 ),
                 InnerRequestError::FileWriteFailed { length, error } => write!(
                     f,
-                    "could not write to [{}], num_bytes={}: {}",
-                    path, length, error
+                    "could not write to [{path}], num_bytes={length}: {error}"
                 ),
                 InnerRequestError::ResponseNotUtf8 { source } => {
-                    write!(f, "could not decode the response as UTF-8: {}", source)
+                    write!(f, "could not decode the response as UTF-8: {source}")
                 }
                 InnerRequestError::ResultConversionFailed => {
-                    write!(f, "Could not convert {} to the target result", path)
+                    write!(f, "Could not convert {path} to the target result")
                 }
                 InnerRequestError::CurlError(error) => {
-                    write!(f, "Underlying curl error: {}", error)
+                    write!(f, "Underlying curl error: {error}")
                 }
                 InnerRequestError::MultiError(errors) => match &errors[..] {
                     [] => f.write_str("Empty errors"),

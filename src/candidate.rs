@@ -13,7 +13,7 @@ pub struct Candidate {
 
 impl Candidate {
     pub(crate) fn new(path: PathBuf) -> Self {
-        let version = lenient_semver_parser::parse_partial::<Version>(Self::name_from_path(&*path))
+        let version = lenient_semver_parser::parse_partial::<Version>(Self::name_from_path(&path))
             .ok()
             .map(|(v, _)| v);
         Self { version, path }

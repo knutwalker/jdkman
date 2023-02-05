@@ -192,7 +192,7 @@ fn print_using(
     eprintln_green!("Using java version {} in this shell.", name);
     println!("export JAVA_HOME=\"{}\"", java_home.display());
     if let Some(path) = path {
-        println!("export PATH=\"{}\"", path);
+        println!("export PATH=\"{path}\"");
     }
     Ok(())
 }
@@ -294,7 +294,7 @@ pub(crate) fn run() -> Result<()> {
             let all_flag = args.contains(["-a", "--all"]);
             expect_no_more_args(args)?;
             let result = JdkList::run(verbose_flag, all_flag)?;
-            eprint!("{}", result);
+            eprint!("{result}");
         }
         Some("use" | "us") => {
             help!("use", wants_help);
@@ -314,7 +314,7 @@ pub(crate) fn run() -> Result<()> {
 
 pub fn main() {
     if let Err(err) = run() {
-        eprintln!("{}", err);
+        eprintln!("{err}");
         std::process::exit(1)
     }
 }

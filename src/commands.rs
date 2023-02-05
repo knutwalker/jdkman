@@ -258,10 +258,7 @@ mod default_command {
     }
 
     pub(super) fn suggested(verbose: bool, candidates_api: &str) -> io::Result<String> {
-        request(
-            format!("{}/candidates/default/java", candidates_api),
-            verbose,
-        )
+        request(format!("{candidates_api}/candidates/default/java"), verbose)
     }
 
     pub(super) fn run(
@@ -342,17 +339,12 @@ mod validate_command {
         verbose: bool,
         version: &str,
     ) -> io::Result<bool> {
-        let url = format!(
-            "{api}/candidates/validate/java/{version}/{platform}",
-            api = candidates_api,
-            version = version,
-            platform = platform,
-        );
+        let url = format!("{candidates_api}/candidates/validate/java/{version}/{platform}",);
         let valid = request(url, verbose)?;
         match valid.trim() {
             "valid" => Ok(true),
             "invalid" => Ok(false),
-            otherwise => Err(io::Error::new(io::ErrorKind::Other, format!("Unexpected validation response, expected either 'valid' or 'invalid', but got {}", otherwise)))
+            otherwise => Err(io::Error::new(io::ErrorKind::Other, format!("Unexpected validation response, expected either 'valid' or 'invalid', but got {otherwise}")))
         }
     }
 }
@@ -395,6 +387,7 @@ mod install_command {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn run(
         candidates_dir: &Path,
         archives_dir: &Path,
@@ -424,7 +417,7 @@ mod install_command {
             version,
         )?;
 
-        let zip_archive_target = archives_dir.join(format!("java-{}.zip", version));
+        let zip_archive_target = archives_dir.join(format!("java-{version}.zip"));
 
         // download unless file already exists
         if !matches!(fs::symlink_metadata(&zip_archive_target), Ok(meta) if meta.is_file()) {
@@ -438,8 +431,7 @@ mod install_command {
             )?;
         } else {
             eprintln!(
-                "Found a previously downloaded java {} archive. Not downloading it again...",
-                version
+                "Found a previously downloaded java {version} archive. Not downloading it again..."
             );
         }
 
@@ -478,14 +470,9 @@ mod install_command {
     ) -> Result<(), InstallError> {
         pre_install(temp_dir, candidates_api, platform, verbose, version)?;
 
-        let url = format!(
-            "{api}/broker/download/java/{version}/{platform}",
-            api = candidates_api,
-            version = version,
-            platform = platform
-        );
+        let url = format!("{candidates_api}/broker/download/java/{version}/{platform}");
 
-        let binary_input = temp_dir.join(format!("java-{}.bin", version));
+        let binary_input = temp_dir.join(format!("java-{version}.bin"));
 
         let response = DurlRequestBuilder::new()
             .progress_bar()
@@ -691,9 +678,9 @@ mod list_command {
             let candidate = candidate.into_name();
 
             if matches!(current, Some(c) if c == candidate) {
-                let _ = writeln!(&mut output, " > {}", candidate);
+                let _ = writeln!(&mut output, " > {candidate}");
             } else {
-                let _ = writeln!(&mut output, " * {}", candidate);
+                let _ = writeln!(&mut output, " * {candidate}");
             }
         }
 
