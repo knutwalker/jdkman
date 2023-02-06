@@ -1,6 +1,6 @@
 [package]
 name = "jdkman"
-version = "0.5.1"
+version = "0.5.2"
 description = "Personalised sdkman frontend specialized for Java"
 authors = ["Paul Horn <developer@knutwalker.de>"]
 license = "MIT OR Apache-2.0"
